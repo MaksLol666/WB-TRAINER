@@ -686,3 +686,130 @@ async def change_user_role(
 
         await db.commit()
 
+# ============================================================
+# START / REGISTRATION
+# ============================================================
+
+
+@router.message(CommandStart())
+async def start_command(
+        message: Message,
+        state: FSMContext
+):
+
+    telegram_id = message.from_user.id
+    full_name = message.from_user.full_name
+
+
+    # Проверяем главного администратора
+
+    await ensure_admin_exists(
+        telegram_id,
+        full_name
+    )
+
+
+    user = await get_user(
+        telegram_id
+    )
+
+
+    # Если пользователь уже есть
+
+    if user:
+
+
+        role = user[3]
+
+
+        if role == ROLE_ADMIN:
+
+            await message.answer(
+                "👑 <b>WB TRAINER</b>\n\n"
+                "Вы вошли как главный администратор.",
+                reply_markup=admin_menu()
+            )
+
+
+        elif role == ROLE_EMPLOYEE:
+
+            await message.answer(
+                "🎓 <b>WB TRAINER</b>\n\n"
+                "Добро пожаловать!\n"
+                "Выберите действие:",
+                reply_markup=employee_menu()
+            )
+
+
+        return
+
+
+
+    # Если пользователь новый
+
+    await message.answer(
+        "🎓 <b>WB TRAINER</b>\n\n"
+        "Вы ещё не зарегистрированы.\n\n"
+        "Введите код вашего ПВЗ:",
+        reply_markup=registration_menu()
+    )
+
+
+    await state.set_state(
+        RegisterState.waiting_invite_code
+    )
+
+
+
+# ============================================================
+# РЕГИСТРАЦИЯ ПО КОДУ ПВЗ
+# ============================================================
+
+
+@router.message(
+    RegisterState.waiting_invite_code
+)
+async def register_by_code(
+        message: Message,
+        state: FSMContext
+):
+
+    code = message.text.strip().upper()
+
+
+    pvz = await get_pvz_by_code(
+        code
+    )
+
+
+    if not pvz:
+
+        await message.answer(
+            "❌ Такой код ПВЗ не найден.\n\n"
+            "Проверьте код и попробуйте снова."
+        )
+
+        return
+
+
+
+    telegram_id = message.from_user.id
+    full_name = message.from_user.full_name
+
+
+    await add_user(
+        telegram_id,
+        full_name,
+        ROLE_EMPLOYEE,
+        pvz[0]
+    )
+
+
+    await state.clear()
+
+
+    await message.answer(
+        "✅ Регистрация успешно завершена!\n\n"
+        "Теперь вы можете проходить обучение и тесты.",
+        reply_markup=employee_menu()
+    )
