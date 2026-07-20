@@ -813,3 +813,72 @@ async def register_by_code(
         "Теперь вы можете проходить обучение и тесты.",
         reply_markup=employee_menu()
     )
+
+# ============================================================
+# CREATE PVZ (ADMIN)
+# ============================================================
+
+
+@router.message(
+    F.text == "➕ Создать ПВЗ"
+)
+async def create_pvz_start(
+        message: Message,
+        state: FSMContext
+):
+
+    telegram_id = message.from_user.id
+
+
+    if not is_admin(telegram_id):
+
+        await message.answer(
+            "❌ У вас нет доступа к этому разделу."
+        )
+
+        return
+
+
+    await message.answer(
+        "🏢 <b>Создание нового ПВЗ</b>\n\n"
+        "Введите название точки:"
+    )
+
+
+    await state.set_state(
+        CreatePVZState.waiting_name
+    )
+
+
+
+@router.message(
+    CreatePVZState.waiting_name
+)
+async def create_pvz_finish(
+        message: Message,
+        state: FSMContext
+):
+
+    name = message.text.strip()
+
+
+    telegram_id = message.from_user.id
+
+
+    pvz_id, code = await create_pvz(
+        name,
+        telegram_id
+    )
+
+
+    await state.clear()
+
+
+    await message.answer(
+        "✅ <b>ПВЗ создан!</b>\n\n"
+        f"🏢 Название:\n{name}\n\n"
+        f"🔑 Код подключения сотрудников:\n"
+        f"<code>{code}</code>\n\n"
+        "Передайте этот код сотрудникам.",
+        reply_markup=admin_menu()
+    )
