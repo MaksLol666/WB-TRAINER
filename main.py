@@ -245,13 +245,12 @@ async def add_user(
                 role,
                 pvz_id,
                 created_at
-                )
+            )
 
             VALUES (?, ?, ?, ?, ?, ?)
 
             """,
             (
-
                 telegram_id,
                 full_name,
                 username,
@@ -259,9 +258,9 @@ async def add_user(
                 pvz_id,
                 datetime.now().isoformat()
             )
+        )
 
         await db.commit()
-
 
 
 async def update_user_pvz(
