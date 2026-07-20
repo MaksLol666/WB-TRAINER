@@ -968,3 +968,29 @@ async def my_pvz(
         text,
         reply_markup=admin_menu()
         )
+
+# ============================================================
+# START BOT
+# ============================================================
+
+
+async def main():
+
+    print("🚀 WB TRAINER запускается...")
+
+
+    await init_db()
+
+
+    print("✅ База данных готова")
+
+
+    await dp.start_polling(
+        bot
+    )
+
+
+
+if __name__ == "__main__":
+
+    asyncio.run(main())
