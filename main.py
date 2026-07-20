@@ -1098,15 +1098,14 @@ text += (
     f"Дата: {user[6][:10]}\n\n"
 )
 
-    await message.answer(
-        text,
-        reply_markup=admin_menu()
-    )
-    
+await message.answer(
+    text,
+    reply_markup=admin_menu()
+)
+
 # ============================================================
 # START BOT
 # ============================================================
-
 
 async def main():
 
