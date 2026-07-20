@@ -803,11 +803,12 @@ async def register_by_code(
 
 
     await add_user(
-        telegram_id,
-        full_name,
-        ROLE_EMPLOYEE,
-        pvz[0]
-    )
+    telegram_id,
+    full_name,
+    username,
+    ROLE_EMPLOYEE,
+    pvz[0]
+)
 
 
     await state.clear()
@@ -1084,13 +1085,19 @@ async def employees_list(
 
         for user in users:
 
-            text += (
-                f"👤 {user[2]}\n"
-                f"Роль: {user[3]}\n"
-                f"ID: <code>{user[1]}</code>\n"
-                f"Дата: {user[5][:10]}\n\n"
-            )
+                name = (
+    f"@{user[3]}"
+    if user[3]
+    else user[2]
+)
 
+text += (
+    f"👤 {name}\n"
+    f"Имя: {user[2]}\n"
+    f"Роль: {user[4]}\n"
+    f"ID: <code>{user[1]}</code>\n"
+    f"Дата: {user[6][:10]}\n\n"
+)
 
     await message.answer(
         text,
