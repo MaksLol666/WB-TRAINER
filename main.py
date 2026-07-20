@@ -120,7 +120,9 @@ async def init_db():
             telegram_id INTEGER UNIQUE,
 
             full_name TEXT,
-
+            
+            username TEXT,
+           
             role TEXT,
 
             pvz_id INTEGER,
@@ -226,6 +228,7 @@ async def get_user(telegram_id: int):
 async def add_user(
         telegram_id: int,
         full_name: str,
+        username: str | None,
         role: str = ROLE_EMPLOYEE,
         pvz_id: int | None = None
 ):
@@ -238,22 +241,24 @@ async def add_user(
             (
                 telegram_id,
                 full_name,
+                username,
                 role,
                 pvz_id,
                 created_at
-            )
+                )
 
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
 
             """,
             (
+
                 telegram_id,
                 full_name,
+                username,
                 role,
                 pvz_id,
                 datetime.now().isoformat()
             )
-        )
 
         await db.commit()
 
@@ -699,7 +704,7 @@ async def start_command(
 
     telegram_id = message.from_user.id
     full_name = message.from_user.full_name
-
+    username = message.from_user.username
 
     # Проверяем главного администратора
 
