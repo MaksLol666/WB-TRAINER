@@ -8,7 +8,7 @@
 import asyncio
 import json
 import random
-import string
+import secrets
 from datetime import datetime
 
 import aiosqlite
@@ -63,3 +63,117 @@ dp = Dispatcher(storage=storage)
 router = Router()
 
 dp.include_router(router)
+
+# ============================================================
+# СОСТОЯНИЯ (FSM)
+# ============================================================
+
+class RegisterState(StatesGroup):
+    waiting_invite_code = State()
+
+
+class CreatePVZState(StatesGroup):
+    waiting_name = State()
+
+
+class AddQuestionState(StatesGroup):
+    waiting_category = State()
+    waiting_type = State()
+    waiting_question = State()
+    waiting_answers = State()
+    waiting_correct = State()
+    waiting_explanation = State()
+
+
+class TestState(StatesGroup):
+    answering = State()
+
+# ============================================================
+# DATABASE
+# ============================================================
+
+async def init_db():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS users(
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            telegram_id INTEGER UNIQUE,
+
+            full_name TEXT,
+
+            role TEXT,
+
+            pvz_id INTEGER,
+
+            created_at TEXT
+
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS pvz(
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            name TEXT,
+
+            invite_code TEXT UNIQUE,
+
+            owner_id INTEGER,
+
+            created_at TEXT
+
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS questions(
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            category TEXT,
+
+            difficulty INTEGER,
+
+            type TEXT,
+
+            question TEXT,
+
+            answers TEXT,
+
+            correct_answers TEXT,
+
+            explanation TEXT,
+
+            weight INTEGER DEFAULT 1,
+
+            created_at TEXT
+
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS results(
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            user_id INTEGER,
+
+            score INTEGER,
+
+            correct_answers INTEGER,
+
+            total_questions INTEGER,
+
+            created_at TEXT
+
+        )
+        """)
+
+        await db.commit()
+        
+
