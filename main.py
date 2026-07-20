@@ -30,7 +30,12 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import State, StatesGroup
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 
 # ============================================================
 # НАСТРОЙКИ
@@ -44,6 +49,17 @@ ADMINS = [
 
 DATABASE = "wb_trainer.db"
 
+# ============================================================
+# КОНСТАНТЫ
+# ============================================================
+
+ROLE_ADMIN = "admin"
+ROLE_EMPLOYEE = "employee"
+
+QUESTION_SINGLE = "single"
+QUESTION_MULTI = "multi"
+QUESTION_SEQUENCE = "sequence"
+QUESTION_SITUATION = "situation"
 
 # ============================================================
 # BOT
@@ -175,5 +191,14 @@ async def init_db():
         """)
 
         await db.commit()
+
+# ============================================================
+# СЛУЖЕБНЫЕ ФУНКЦИИ
+# ============================================================
+
+def generate_invite_code():
+    return "WB-" + secrets.token_hex(3).upper()
+
+
         
 
