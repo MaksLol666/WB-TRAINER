@@ -199,6 +199,246 @@ async def init_db():
 def generate_invite_code():
     return "WB-" + secrets.token_hex(3).upper()
 
+# ============================================================
+# DATABASE FUNCTIONS
+# ============================================================
+
+
+async def get_user(telegram_id: int):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+            FROM users
+            WHERE telegram_id = ?
+            """,
+            (telegram_id,)
+        )
+
+        user = await cursor.fetchone()
+
+        return user
+
+
+
+async def add_user(
+        telegram_id: int,
+        full_name: str,
+        role: str = ROLE_EMPLOYEE,
+        pvz_id: int | None = None
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO users
+            (
+                telegram_id,
+                full_name,
+                role,
+                pvz_id,
+                created_at
+            )
+
+            VALUES (?, ?, ?, ?, ?)
+
+            """,
+            (
+                telegram_id,
+                full_name,
+                role,
+                pvz_id,
+                datetime.now().isoformat()
+            )
+        )
+
+        await db.commit()
+
+
+
+async def update_user_pvz(
+        telegram_id: int,
+        pvz_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE users
+
+            SET pvz_id = ?
+
+            WHERE telegram_id = ?
+
+            """,
+            (
+                pvz_id,
+                telegram_id
+            )
+        )
+
+        await db.commit()
+
+
+
+async def create_pvz(
+        name: str,
+        owner_id: int
+):
+
+    code = generate_invite_code()
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            INSERT INTO pvz
+            (
+                name,
+                invite_code,
+                owner_id,
+                created_at
+            )
+
+            VALUES (?, ?, ?, ?)
+
+            """,
+            (
+                name,
+                code,
+                owner_id,
+                datetime.now().isoformat()
+            )
+        )
+
+
+        await db.commit()
+
+        return cursor.lastrowid, code
+
+
+
+async def get_pvz_by_code(code: str):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM pvz
+
+            WHERE invite_code = ?
+
+            """,
+            (code,)
+        )
+
+        pvz = await cursor.fetchone()
+
+        return pvz
+
+
+
+async def get_pvz_by_id(pvz_id: int):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM pvz
+
+            WHERE id = ?
+
+            """,
+            (pvz_id,)
+        )
+
+        return await cursor.fetchone()
+
+
+
+async def get_pvz_employees(pvz_id: int):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            WHERE pvz_id = ?
+
+            """,
+            (pvz_id,)
+        )
+
+        return await cursor.fetchall()
+
+
+
+async def save_result(
+        user_id: int,
+        score: int,
+        correct: int,
+        total: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            INSERT INTO results
+            (
+                user_id,
+                score,
+                correct_answers,
+                total_questions,
+                created_at
+            )
+
+            VALUES (?, ?, ?, ?, ?)
+
+            """,
+            (
+                user_id,
+                score,
+                correct,
+                total,
+                datetime.now().isoformat()
+            )
+        )
+
+        await db.commit()
+
+
+
+async def get_user_results(user_id: int):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM results
+
+            WHERE user_id = ?
+
+            ORDER BY id DESC
+
+            """,
+            (user_id,)
+        )
+
+        return await cursor.fetchall()
 
         
 
