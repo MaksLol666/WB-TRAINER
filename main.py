@@ -440,5 +440,122 @@ async def get_user_results(user_id: int):
 
         return await cursor.fetchall()
 
+# ============================================================
+# KEYBOARDS
+# ============================================================
+
+
+def employee_menu():
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="📚 Начать тест"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="📊 Мои результаты"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="👤 Профиль"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+    return keyboard
+
+
+
+def admin_menu():
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="🏢 Мои ПВЗ"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="👥 Сотрудники"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="📝 Управление тестами"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="📊 Статистика"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="➕ Создать ПВЗ"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+    return keyboard
+
+
+
+def registration_menu():
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="🔑 Ввести код ПВЗ"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+    return keyboard
+
+
+
+def back_menu():
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="⬅ Назад"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+    return keyboard
+
+
+
+def cancel_menu():
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="❌ Отмена"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+    return keyboard
         
 
