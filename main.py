@@ -970,6 +970,129 @@ async def my_pvz(
         )
 
 # ============================================================
+# EMPLOYEES MANAGEMENT
+# ============================================================
+
+
+async def get_all_pvz_employees(
+        owner_id: int
+):
+
+    pvzs = await get_admin_pvz(
+        owner_id
+    )
+
+
+    employees = []
+
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        for pvz in pvzs:
+
+            cursor = await db.execute(
+                """
+                SELECT *
+
+                FROM users
+
+                WHERE pvz_id = ?
+
+                """,
+                (pvz[0],)
+            )
+
+            users = await cursor.fetchall()
+
+
+            employees.append(
+                {
+                    "pvz": pvz,
+                    "users": users
+                }
+            )
+
+
+    return employees
+
+
+
+@router.message(
+    F.text == "👥 Сотрудники"
+)
+async def employees_list(
+        message: Message
+):
+
+    telegram_id = message.from_user.id
+
+
+    if not is_admin(telegram_id):
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
+    data = await get_all_pvz_employees(
+        telegram_id
+    )
+
+
+    if not data:
+
+        await message.answer(
+            "👥 Сотрудников пока нет."
+        )
+
+        return
+
+
+
+    text = (
+        "👥 <b>Сотрудники ваших ПВЗ:</b>\n\n"
+    )
+
+
+    for item in data:
+
+        pvz = item["pvz"]
+        users = item["users"]
+
+
+        text += (
+            f"📍 <b>{pvz[1]}</b>\n\n"
+        )
+
+
+        if not users:
+
+            text += (
+                "Нет сотрудников\n\n"
+            )
+
+            continue
+
+
+        for user in users:
+
+            text += (
+                f"👤 {user[2]}\n"
+                f"Роль: {user[3]}\n"
+                f"ID: <code>{user[1]}</code>\n"
+                f"Дата: {user[5][:10]}\n\n"
+            )
+
+
+    await message.answer(
+        text,
+        reply_markup=admin_menu()
+    )
+    
+# ============================================================
 # START BOT
 # ============================================================
 
