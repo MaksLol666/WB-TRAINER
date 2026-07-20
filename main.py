@@ -557,5 +557,132 @@ def cancel_menu():
     )
 
     return keyboard
-        
+
+# ============================================================
+# USER MANAGEMENT
+# ============================================================
+
+
+def is_admin(telegram_id: int) -> bool:
+
+    return telegram_id in ADMINS
+
+
+
+async def create_admin_user(
+        telegram_id: int,
+        full_name: str
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO users
+            (
+                telegram_id,
+                full_name,
+                role,
+                pvz_id,
+                created_at
+            )
+
+            VALUES (?, ?, ?, ?, ?)
+
+            """,
+            (
+                telegram_id,
+                full_name,
+                ROLE_ADMIN,
+                None,
+                datetime.now().isoformat()
+            )
+        )
+
+        await db.commit()
+
+
+
+async def get_user_role(
+        telegram_id: int
+):
+
+    user = await get_user(telegram_id)
+
+    if user is None:
+        return None
+
+    return user[3]
+
+
+
+async def ensure_admin_exists(
+        telegram_id: int,
+        full_name: str
+):
+
+    if not is_admin(telegram_id):
+        return
+
+
+    user = await get_user(telegram_id)
+
+
+    if user is None:
+
+        await create_admin_user(
+            telegram_id,
+            full_name
+        )
+
+
+
+async def get_user_id(
+        telegram_id: int
+):
+
+    user = await get_user(telegram_id)
+
+
+    if user is None:
+        return None
+
+
+    return user[0]
+
+
+
+async def user_is_registered(
+        telegram_id: int
+):
+
+    user = await get_user(telegram_id)
+
+    return user is not None
+
+
+
+async def change_user_role(
+        telegram_id: int,
+        role: str
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE users
+
+            SET role = ?
+
+            WHERE telegram_id = ?
+
+            """,
+            (
+                role,
+                telegram_id
+            )
+        )
+
+        await db.commit()
 
