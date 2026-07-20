@@ -882,3 +882,89 @@ async def create_pvz_finish(
         "Передайте этот код сотрудникам.",
         reply_markup=admin_menu()
     )
+
+# ============================================================
+# PVZ MANAGEMENT
+# ============================================================
+
+
+async def get_admin_pvz(
+        owner_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM pvz
+
+            WHERE owner_id = ?
+
+            """,
+            (owner_id,)
+        )
+
+        return await cursor.fetchall()
+
+
+
+@router.message(
+    F.text == "🏢 Мои ПВЗ"
+)
+async def my_pvz(
+        message: Message
+):
+
+    telegram_id = message.from_user.id
+
+
+    if not is_admin(telegram_id):
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
+    pvzs = await get_admin_pvz(
+        telegram_id
+    )
+
+
+    if not pvzs:
+
+        await message.answer(
+            "🏢 У вас пока нет созданных ПВЗ."
+        )
+
+        return
+
+
+
+    text = (
+        "🏢 <b>Ваши ПВЗ:</b>\n\n"
+    )
+
+
+    for pvz in pvzs:
+
+        employees = await get_pvz_employees(
+            pvz[0]
+        )
+
+
+        text += (
+            f"📍 <b>{pvz[1]}</b>\n"
+            f"🔑 Код: <code>{pvz[2]}</code>\n"
+            f"👥 Сотрудников: {len(employees)}\n\n"
+        )
+
+
+    await message.answer(
+        text,
+        reply_markup=admin_menu()
+        )
