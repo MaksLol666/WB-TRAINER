@@ -725,3 +725,418 @@ async def get_pvz_employees(
 
 
         return await cursor.fetchall()
+
+# ============================================================
+# START / REGISTRATION
+# ============================================================
+
+
+@router.message(CommandStart())
+async def start_command(
+        message: Message,
+        state: FSMContext
+):
+
+    telegram_id = message.from_user.id
+
+    full_name = message.from_user.full_name
+
+    username = message.from_user.username
+
+
+    await ensure_admin_exists(
+        telegram_id,
+        full_name,
+        username
+    )
+
+
+    user = await get_user(
+        telegram_id
+    )
+
+
+    if user:
+
+
+        role = user[4]
+
+
+        if role == ROLE_ADMIN:
+
+
+            await message.answer(
+                "👑 <b>WB TRAINER</b>\n\n"
+                "Вы вошли как главный администратор.",
+                reply_markup=admin_menu()
+            )
+
+
+        else:
+
+
+            await message.answer(
+                "🎓 <b>WB TRAINER</b>\n\n"
+                "Добро пожаловать!\n"
+                "Выберите действие:",
+                reply_markup=employee_menu()
+            )
+
+
+        return
+
+
+
+
+    await message.answer(
+        "🎓 <b>WB TRAINER</b>\n\n"
+        "Вы ещё не зарегистрированы.\n\n"
+        "Введите код вашего ПВЗ:",
+        reply_markup=registration_menu()
+    )
+
+
+    await state.set_state(
+        RegisterState.waiting_invite_code
+    )
+
+
+
+
+
+
+# ============================================================
+# EMPLOYEE REGISTRATION
+# ============================================================
+
+
+
+@router.message(
+    RegisterState.waiting_invite_code
+)
+async def register_by_code(
+        message: Message,
+        state: FSMContext
+):
+
+
+    code = message.text.strip().upper()
+
+
+
+    pvz = await get_pvz_by_code(
+        code
+    )
+
+
+    if not pvz:
+
+
+        await message.answer(
+            "❌ Такой код ПВЗ не найден."
+        )
+
+        return
+
+
+
+
+    telegram_id = message.from_user.id
+
+    full_name = message.from_user.full_name
+
+    username = message.from_user.username
+
+
+
+
+    await add_user(
+        telegram_id,
+        full_name,
+        username,
+        ROLE_EMPLOYEE,
+        pvz[0]
+    )
+
+
+
+    await state.clear()
+
+
+
+    await message.answer(
+        "✅ Регистрация успешно завершена!\n\n"
+        "Теперь вы можете проходить обучение.",
+        reply_markup=employee_menu()
+    )
+
+
+
+
+
+
+# ============================================================
+# CREATE PVZ
+# ============================================================
+
+
+
+@router.message(
+    F.text == "➕ Создать ПВЗ"
+)
+async def create_pvz_start(
+        message: Message,
+        state: FSMContext
+):
+
+
+    if not is_admin(
+        message.from_user.id
+    ):
+
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
+
+    await message.answer(
+        "🏢 Введите название нового ПВЗ:"
+    )
+
+
+
+    await state.set_state(
+        CreatePVZState.waiting_name
+    )
+
+
+
+
+
+
+@router.message(
+    CreatePVZState.waiting_name
+)
+async def create_pvz_finish(
+        message: Message,
+        state: FSMContext
+):
+
+
+    name = message.text.strip()
+
+
+
+    pvz_id, code = await create_pvz(
+        name,
+        message.from_user.id
+    )
+
+
+
+    await state.clear()
+
+
+
+    await message.answer(
+        "✅ <b>ПВЗ создан!</b>\n\n"
+        f"📍 {name}\n"
+        f"🔑 Код сотрудников:\n"
+        f"<code>{code}</code>",
+        reply_markup=admin_menu()
+    )
+
+
+
+
+
+
+# ============================================================
+# MY PVZ
+# ============================================================
+
+
+
+@router.message(
+    F.text == "🏢 Мои ПВЗ"
+)
+async def my_pvz(
+        message: Message
+):
+
+
+    if not is_admin(
+        message.from_user.id
+    ):
+
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
+
+    pvzs = await get_admin_pvz(
+        message.from_user.id
+    )
+
+
+
+    if not pvzs:
+
+
+        await message.answer(
+            "🏢 У вас пока нет ПВЗ."
+        )
+
+        return
+
+
+
+
+    text = (
+        "🏢 <b>Ваши ПВЗ:</b>\n\n"
+    )
+
+
+
+    for pvz in pvzs:
+
+
+        employees = await get_pvz_employees(
+            pvz[0]
+        )
+
+
+        text += (
+            f"📍 <b>{pvz[1]}</b>\n"
+            f"🔑 Код: <code>{pvz[2]}</code>\n"
+            f"👥 Сотрудников: {len(employees)}\n\n"
+        )
+
+
+
+    await message.answer(
+        text,
+        reply_markup=admin_menu()
+    )
+
+
+
+
+
+# ============================================================
+# EMPLOYEES LIST
+# ============================================================
+
+
+
+@router.message(
+    F.text == "👥 Сотрудники"
+)
+async def employees_list(
+        message: Message
+):
+
+
+    if not is_admin(
+        message.from_user.id
+    ):
+
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
+
+    pvzs = await get_admin_pvz(
+        message.from_user.id
+    )
+
+
+
+    if not pvzs:
+
+
+        await message.answer(
+            "👥 ПВЗ пока нет."
+        )
+
+        return
+
+
+
+
+    text = (
+        "👥 <b>Сотрудники ваших ПВЗ:</b>\n\n"
+    )
+
+
+
+    for pvz in pvzs:
+
+
+        users = await get_pvz_employees(
+            pvz[0]
+        )
+
+
+        text += (
+            f"📍 <b>{pvz[1]}</b>\n\n"
+        )
+
+
+
+        if not users:
+
+
+            text += (
+                "Сотрудников нет\n\n"
+            )
+
+            continue
+
+
+
+
+        for user in users:
+
+
+            username = user[3]
+
+
+            if username:
+
+                name = "@" + username
+
+            else:
+
+                name = user[2]
+
+
+
+            text += (
+                f"👤 {name}\n"
+                f"Роль: {user[4]}\n"
+                f"ID: <code>{user[1]}</code>\n"
+                f"Дата: {user[6][:10]}\n\n"
+            )
+
+
+
+    await message.answer(
+        text,
+        reply_markup=admin_menu()
+)
