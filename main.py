@@ -723,7 +723,7 @@ async def start_command(
     if user:
 
 
-        role = user[3]
+        role = user[4]
 
 
         if role == ROLE_ADMIN:
