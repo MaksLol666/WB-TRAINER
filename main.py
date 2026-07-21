@@ -622,9 +622,9 @@ async def get_user_role(
 
 async def ensure_admin_exists(
         telegram_id: int,
-        full_name: str
+        full_name: str,
+        username: str | None
 ):
-
     if not is_admin(telegram_id):
         return
 
@@ -635,9 +635,10 @@ async def ensure_admin_exists(
     if user is None:
 
         await create_admin_user(
-            telegram_id,
-            full_name
-        )
+    telegram_id,
+    full_name,
+    username
+)
 
 
 
@@ -707,10 +708,11 @@ async def start_command(
 
     # Проверяем главного администратора
 
-    await ensure_admin_exists(
-        telegram_id,
-        full_name
-    )
+    async def ensure_admin_exists(
+        telegram_id: int,
+        full_name: str,
+        username: str | None
+):
 
 
     user = await get_user(
