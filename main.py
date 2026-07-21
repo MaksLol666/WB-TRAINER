@@ -727,6 +727,34 @@ async def get_pvz_employees(
         return await cursor.fetchall()
 
 # ============================================================
+# GET PVZ BY ID
+# ============================================================
+
+
+async def get_pvz_by_id(
+        pvz_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM pvz
+
+            WHERE id = ?
+
+            """,
+            (
+                pvz_id,
+            )
+        )
+
+
+        return await cursor.fetchone()
+
+# ============================================================
 # START / REGISTRATION
 # ============================================================
 
