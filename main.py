@@ -727,6 +727,75 @@ async def get_pvz_employees(
         return await cursor.fetchall()
 
 # ============================================================
+# SAVE TEST RESULT
+# ============================================================
+
+
+async def save_result(
+        user_id: int,
+        score: int,
+        correct: int,
+        total: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            INSERT INTO results
+            (
+                user_id,
+                score,
+                correct_answers,
+                total_questions,
+                created_at
+            )
+
+            VALUES (?, ?, ?, ?, ?)
+
+            """,
+            (
+                user_id,
+                score,
+                correct,
+                total,
+                datetime.now().isoformat()
+            )
+        )
+
+        await db.commit()
+
+
+# ============================================================
+# GET USER RESULTS
+# ============================================================
+
+
+async def get_user_results(
+        user_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM results
+
+            WHERE user_id = ?
+
+            ORDER BY id DESC
+
+            """,
+            (
+                user_id,
+            )
+        )
+
+        return await cursor.fetchall()
+
+# ============================================================
 # GET PVZ BY ID
 # ============================================================
 
