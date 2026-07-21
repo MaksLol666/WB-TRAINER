@@ -1178,7 +1178,7 @@ async def employees_list(
 
         for user in users:
 
-            username = user[3]
+            username = user[4]
 
             if username:
                 name = f"@{username}"
