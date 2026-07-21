@@ -1140,3 +1140,229 @@ async def employees_list(
         text,
         reply_markup=admin_menu()
 )
+
+# ============================================================
+# RESULTS
+# ============================================================
+
+
+@router.message(
+    F.text == "📊 Мои результаты"
+)
+async def my_results(
+        message: Message
+):
+
+
+    user = await get_user(
+        message.from_user.id
+    )
+
+
+    if not user:
+
+
+        await message.answer(
+            "❌ Вы не зарегистрированы."
+        )
+
+        return
+
+
+
+    results = await get_user_results(
+        user[0]
+    )
+
+
+
+    if not results:
+
+
+        await message.answer(
+            "📊 У вас пока нет результатов тестов."
+        )
+
+        return
+
+
+
+    text = (
+        "📊 <b>Ваши результаты:</b>\n\n"
+    )
+
+
+
+    for result in results:
+
+
+        text += (
+            f"🏆 Баллы: {result[2]}\n"
+            f"✅ Правильных: {result[3]}/{result[4]}\n"
+            f"📅 {result[5][:10]}\n\n"
+        )
+
+
+
+    await message.answer(
+        text,
+        reply_markup=employee_menu()
+    )
+
+
+
+
+
+# ============================================================
+# PROFILE
+# ============================================================
+
+
+
+@router.message(
+    F.text == "👤 Профиль"
+)
+async def profile(
+        message: Message
+):
+
+
+    user = await get_user(
+        message.from_user.id
+    )
+
+
+    if not user:
+
+
+        await message.answer(
+            "❌ Профиль не найден."
+        )
+
+        return
+
+
+
+
+    username = user[3]
+
+
+
+    if username:
+
+        username = "@" + username
+
+    else:
+
+        username = "нет"
+
+
+
+
+    pvz_text = "Нет ПВЗ"
+
+
+
+    if user[5]:
+
+
+        pvz = await get_pvz_by_id(
+            user[5]
+        )
+
+
+        if pvz:
+
+            pvz_text = pvz[1]
+
+
+
+
+    await message.answer(
+        "👤 <b>Профиль</b>\n\n"
+        f"Имя: {user[2]}\n"
+        f"Username: {username}\n"
+        f"Роль: {user[4]}\n"
+        f"ПВЗ: {pvz_text}\n"
+        f"ID: <code>{user[1]}</code>"
+    )
+
+
+
+
+
+# ============================================================
+# TEMP TEST SYSTEM
+# ============================================================
+
+
+@router.message(
+    F.text == "📚 Начать тест"
+)
+async def start_test(
+        message: Message
+):
+
+
+    await message.answer(
+        "📝 Тестовая система пока в разработке.\n\n"
+        "Следующий этап — добавление базы вопросов WB."
+    )
+
+
+
+
+
+# ============================================================
+# ERROR SAFE HANDLER
+# ============================================================
+
+
+@router.message()
+async def unknown_message(
+        message: Message
+):
+
+
+    await message.answer(
+        "Я не понял команду.\n"
+        "Используйте кнопки меню."
+    )
+
+
+
+
+
+# ============================================================
+# START BOT
+# ============================================================
+
+
+async def main():
+
+
+    print(
+        "🚀 WB TRAINER запускается..."
+    )
+
+
+    await init_db()
+
+
+    print(
+        "✅ База данных готова"
+    )
+
+
+    await dp.start_polling(
+        bot
+    )
+
+
+
+
+
+if __name__ == "__main__":
+
+
+    asyncio.run(main())
