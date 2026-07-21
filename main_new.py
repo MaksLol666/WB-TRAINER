@@ -397,3 +397,331 @@ async def get_user_role(
 
 
     return user[4]
+
+# ============================================================
+# KEYBOARDS
+# ============================================================
+
+
+def employee_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="📚 Начать тест"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="📊 Мои результаты"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="👤 Профиль"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+
+
+
+
+def admin_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="🏢 Мои ПВЗ"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="👥 Сотрудники"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="📝 Управление тестами"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="📊 Статистика"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="➕ Создать ПВЗ"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+
+
+
+
+def registration_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="🔑 Ввести код ПВЗ"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+
+
+
+
+def back_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="⬅ Назад"
+                )
+            ]
+        ],
+        resize_keyboard=True
+    )
+
+
+
+
+
+# ============================================================
+# ADMIN USER CREATION
+# ============================================================
+
+
+async def create_admin_user(
+        telegram_id: int,
+        full_name: str,
+        username: str | None
+):
+
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO users
+
+            (
+                telegram_id,
+                full_name,
+                username,
+                role,
+                pvz_id,
+                created_at
+            )
+
+            VALUES (?, ?, ?, ?, ?, ?)
+
+            """,
+
+            (
+                telegram_id,
+                full_name,
+                username,
+                ROLE_ADMIN,
+                None,
+                datetime.now().isoformat()
+            )
+        )
+
+
+        await db.commit()
+
+
+
+
+
+
+async def ensure_admin_exists(
+        telegram_id: int,
+        full_name: str,
+        username: str | None
+):
+
+
+    if not is_admin(telegram_id):
+
+        return
+
+
+
+    user = await get_user(
+        telegram_id
+    )
+
+
+    if user is None:
+
+
+        await create_admin_user(
+            telegram_id,
+            full_name,
+            username
+        )
+
+
+
+
+
+
+
+# ============================================================
+# PVZ DATABASE
+# ============================================================
+
+
+
+async def create_pvz(
+        name: str,
+        owner_id: int
+):
+
+
+    code = generate_invite_code()
+
+
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+
+        cursor = await db.execute(
+            """
+            INSERT INTO pvz
+
+            (
+                name,
+                invite_code,
+                owner_id,
+                created_at
+            )
+
+
+            VALUES (?, ?, ?, ?)
+
+            """,
+
+            (
+                name,
+                code,
+                owner_id,
+                datetime.now().isoformat()
+            )
+        )
+
+
+        await db.commit()
+
+
+        return cursor.lastrowid, code
+
+
+
+
+
+
+async def get_pvz_by_code(
+        code: str
+):
+
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM pvz
+
+            WHERE invite_code = ?
+
+            """,
+
+            (
+                code,
+            )
+        )
+
+
+        return await cursor.fetchone()
+
+
+
+
+
+
+async def get_admin_pvz(
+        owner_id: int
+):
+
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM pvz
+
+            WHERE owner_id = ?
+
+            """,
+
+            (
+                owner_id,
+            )
+        )
+
+
+        return await cursor.fetchall()
+
+
+
+
+
+
+async def get_pvz_employees(
+        pvz_id: int
+):
+
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            WHERE pvz_id = ?
+
+            """,
+
+            (
+                pvz_id,
+            )
+        )
+
+
+        return await cursor.fetchall()
