@@ -580,7 +580,101 @@ async def ensure_admin_exists(
 
 
 
+# ============================================================
+# SUPER ADMIN FUNCTIONS
+# ============================================================
 
+async def change_user_role(
+        telegram_id: int,
+        role: str
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE users
+
+            SET role = ?
+
+            WHERE telegram_id = ?
+            """,
+            (
+                role,
+                telegram_id
+            )
+        )
+
+        await db.commit()
+
+
+async def assign_admin_to_pvz(
+        telegram_id: int,
+        pvz_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE users
+
+            SET
+                role = ?,
+                pvz_id = ?
+
+            WHERE telegram_id = ?
+            """,
+            (
+                ROLE_ADMIN,
+                pvz_id,
+                telegram_id
+            )
+        )
+
+        await db.commit()
+
+
+async def remove_employee(
+        telegram_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            DELETE FROM users
+
+            WHERE telegram_id = ?
+            """,
+            (
+                telegram_id,
+            )
+        )
+
+        await db.commit()
+
+
+async def get_all_admins():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            WHERE role = ?
+
+            ORDER BY id
+            """,
+            (
+                ROLE_ADMIN,
+            )
+        )
+
+        return await cursor.fetchall()
 
 
 
