@@ -1830,6 +1830,60 @@ async def my_pvz(
 # ============================================================
 
 
+async def get_pvz_employees_only(
+        pvz_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            WHERE pvz_id = ?
+
+            AND role = ?
+
+            ORDER BY id
+            """,
+            (
+                pvz_id,
+                ROLE_EMPLOYEE
+            )
+        )
+
+        return await cursor.fetchall()
+
+
+
+
+
+async def get_all_pvz_users():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            WHERE role != ?
+
+            ORDER BY pvz_id, id
+            """,
+            (
+                ROLE_SUPER_ADMIN,
+            )
+        )
+
+        return await cursor.fetchall()
+
+
+
+
 
 @router.message(
     F.text == "👥 Сотрудники"
@@ -1839,13 +1893,105 @@ async def employees_list(
 ):
 
 
-    if not is_admin(
+    user = await get_user(
         message.from_user.id
-    ):
+    )
+
+
+    if not user:
 
 
         await message.answer(
-            "❌ Нет доступа."
+            "❌ Пользователь не найден."
+        )
+
+        return
+
+
+
+    role = user[4]
+
+
+
+    # ==================================
+    # ВЛАДЕЛЕЦ ПВЗ
+    # ==================================
+
+    if role == ROLE_ADMIN:
+
+
+        pvzs = await get_admin_pvz(
+            message.from_user.id
+        )
+
+
+        if not pvzs:
+
+
+            await message.answer(
+                "🏢 У вас нет ПВЗ."
+            )
+
+            return
+
+
+
+        text = (
+            "👥 <b>Сотрудники ваших ПВЗ:</b>\n\n"
+        )
+
+
+        for pvz in pvzs:
+
+
+            employees = await get_pvz_employees_only(
+                pvz[0]
+            )
+
+
+            text += (
+                f"📍 <b>{pvz[1]}</b>\n\n"
+            )
+
+
+            if not employees:
+
+
+                text += (
+                    "Сотрудников нет\n\n"
+                )
+
+                continue
+
+
+
+            for employee in employees:
+
+
+                username = employee[3]
+
+
+                if username:
+
+                    name = "@" + username
+
+                else:
+
+                    name = employee[2]
+
+
+
+                text += (
+                    f"👤 {name}\n"
+                    f"ID: <code>{employee[1]}</code>\n"
+                    f"Дата: {employee[6][:10]}\n\n"
+                )
+
+
+
+        await message.answer(
+            text,
+            reply_markup=admin_menu()
         )
 
         return
@@ -1853,60 +1999,66 @@ async def employees_list(
 
 
 
-    pvzs = await get_admin_pvz(
-        message.from_user.id
-    )
+
+    # ==================================
+    # SUPER ADMIN
+    # ==================================
+
+    if role == ROLE_SUPER_ADMIN:
 
 
-
-    if not pvzs:
-
-
-        await message.answer(
-            "👥 ПВЗ пока нет."
-        )
-
-        return
-
-
-
-
-    text = (
-        "👥 <b>Сотрудники ваших ПВЗ:</b>\n\n"
-    )
-
-
-
-    for pvz in pvzs:
-
-
-        users = await get_pvz_employees(
-            pvz[0]
-        )
-
-
-        text += (
-            f"📍 <b>{pvz[1]}</b>\n\n"
-        )
+        users = await get_all_pvz_users()
 
 
 
         if not users:
 
 
-            text += (
-                "Сотрудников нет\n\n"
+            await message.answer(
+                "👥 Пользователей пока нет."
             )
 
-            continue
+            return
 
 
 
+        text = (
+            "👑 <b>Все пользователи системы:</b>\n\n"
+        )
 
-        for user in users:
 
 
-            username = user[3]
+        current_pvz = None
+
+
+
+        for employee in users:
+
+
+            pvz_id = employee[5]
+
+
+            if pvz_id != current_pvz:
+
+
+                current_pvz = pvz_id
+
+
+                pvz = await get_pvz_by_id(
+                    pvz_id
+                )
+
+
+                if pvz:
+
+
+                    text += (
+                        f"📍 <b>{pvz[1]}</b>\n"
+                    )
+
+
+
+            username = employee[3]
 
 
             if username:
@@ -1915,23 +2067,32 @@ async def employees_list(
 
             else:
 
-                name = user[2]
+                name = employee[2]
 
 
 
             text += (
                 f"👤 {name}\n"
-                f"Роль: {user[4]}\n"
-                f"ID: <code>{user[1]}</code>\n"
-                f"Дата: {user[6][:10]}\n\n"
+                f"Роль: {employee[4]}\n"
+                f"ID: <code>{employee[1]}</code>\n\n"
             )
 
 
 
+        await message.answer(
+            text,
+            reply_markup=super_admin_menu()
+        )
+
+        return
+
+
+
+
+
     await message.answer(
-        text,
-        reply_markup=admin_menu()
-)
+        "❌ Нет доступа."
+    )
 
 # ============================================================
 # RESULTS
