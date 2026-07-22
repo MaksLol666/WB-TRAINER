@@ -1641,7 +1641,6 @@ async def create_pvz_finish(
 # ============================================================
 
 
-
 @router.message(
     F.text == "🏢 Мои ПВЗ"
 )
@@ -1650,13 +1649,77 @@ async def my_pvz(
 ):
 
 
-    if not is_admin(
-        message.from_user.id
-    ):
+    user_id = message.from_user.id
+
+
+    user = await get_user(
+        user_id
+    )
+
+
+    if not user:
 
 
         await message.answer(
-            "❌ Нет доступа."
+            "❌ Пользователь не найден."
+        )
+
+        return
+
+
+
+    role = user[4]
+
+
+
+    # =========================
+    # ВЛАДЕЛЕЦ ПВЗ
+    # =========================
+
+    if role == ROLE_ADMIN:
+
+
+        pvzs = await get_admin_pvz(
+            user_id
+        )
+
+
+        if not pvzs:
+
+
+            await message.answer(
+                "🏢 У вас пока нет ПВЗ."
+            )
+
+            return
+
+
+
+        text = (
+            "🏢 <b>Ваши ПВЗ:</b>\n\n"
+        )
+
+
+        for pvz in pvzs:
+
+
+            employees = await get_pvz_employees_only(
+                pvz[0]
+            )
+
+
+            text += (
+                f"📍 <b>{pvz[1]}</b>\n"
+                f"🔑 Код сотрудников: "
+                f"<code>{pvz[2]}</code>\n"
+                f"👥 Сотрудников: {len(employees)}\n\n"
+            )
+
+
+
+        await message.answer(
+            text,
+            reply_markup=admin_menu()
         )
 
         return
@@ -1664,53 +1727,102 @@ async def my_pvz(
 
 
 
-    pvzs = await get_admin_pvz(
-        message.from_user.id
-    )
+
+    # =========================
+    # SUPER ADMIN
+    # =========================
+
+
+    if role == ROLE_SUPER_ADMIN:
+
+
+        async with aiosqlite.connect(DATABASE) as db:
+
+
+            cursor = await db.execute(
+                """
+                SELECT *
+
+                FROM pvz
+
+                ORDER BY id
+                """
+            )
+
+
+            pvzs = await cursor.fetchall()
 
 
 
-    if not pvzs:
+        if not pvzs:
+
+
+            await message.answer(
+                "🏢 ПВЗ пока нет."
+            )
+
+            return
+
+
+
+        text = (
+            "👑 <b>Все ПВЗ системы:</b>\n\n"
+        )
+
+
+        for pvz in pvzs:
+
+
+            owner = "нет"
+
+
+            if pvz[3]:
+
+
+                owner_user = await get_user(
+                    pvz[3]
+                )
+
+
+                if owner_user:
+
+                    if owner_user[3]:
+
+                        owner = "@" + owner_user[3]
+
+                    else:
+
+                        owner = owner_user[2]
+
+
+
+            employees = await get_pvz_employees_only(
+                pvz[0]
+            )
+
+
+            text += (
+                f"📍 <b>{pvz[1]}</b>\n"
+                f"🆔 ID: <code>{pvz[0]}</code>\n"
+                f"👤 Владелец: {owner}\n"
+                f"👥 Сотрудников: {len(employees)}\n\n"
+            )
+
 
 
         await message.answer(
-            "🏢 У вас пока нет ПВЗ."
+            text,
+            reply_markup=super_admin_menu()
         )
 
         return
 
-
-
-
-    text = (
-        "🏢 <b>Ваши ПВЗ:</b>\n\n"
-    )
-
-
-
-    for pvz in pvzs:
-
-
-        employees = await get_pvz_employees(
-            pvz[0]
-        )
-
-
-        text += (
-            f"📍 <b>{pvz[1]}</b>\n"
-            f"🔑 Код: <code>{pvz[2]}</code>\n"
-            f"👥 Сотрудников: {len(employees)}\n\n"
-        )
 
 
 
     await message.answer(
-        text,
-        reply_markup=admin_menu()
-    )
-
-
-
+        "❌ Нет доступа."
+        )
 
 
 # ============================================================
