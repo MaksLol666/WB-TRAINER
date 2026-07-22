@@ -1,7 +1,6 @@
 # ============================================================
 # WB TRAINER
-# Версия: 0.2
-# Полная переработка структуры
+# Версия: 0.3
 # ============================================================
 
 import asyncio
@@ -773,12 +772,9 @@ async def get_all_admins():
 
         return await cursor.fetchall()
 
-
-
 # ============================================================
 # PVZ DATABASE
 # ============================================================
-
 
 
 async def create_pvz(
@@ -786,18 +782,14 @@ async def create_pvz(
         owner_id: int
 ):
 
-
     code = generate_invite_code()
-
 
 
     async with aiosqlite.connect(DATABASE) as db:
 
-
         cursor = await db.execute(
             """
             INSERT INTO pvz
-
             (
                 name,
                 invite_code,
@@ -805,11 +797,8 @@ async def create_pvz(
                 created_at
             )
 
-
             VALUES (?, ?, ?, ?)
-
             """,
-
             (
                 name,
                 code,
@@ -828,14 +817,11 @@ async def create_pvz(
 
 
 
-
 async def get_pvz_by_code(
         code: str
 ):
 
-
     async with aiosqlite.connect(DATABASE) as db:
-
 
         cursor = await db.execute(
             """
@@ -844,9 +830,7 @@ async def get_pvz_by_code(
             FROM pvz
 
             WHERE invite_code = ?
-
             """,
-
             (
                 code,
             )
@@ -859,14 +843,37 @@ async def get_pvz_by_code(
 
 
 
+async def get_pvz_by_id(
+        pvz_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM pvz
+
+            WHERE id = ?
+            """,
+            (
+                pvz_id,
+            )
+        )
+
+
+        return await cursor.fetchone()
+
+
+
+
 
 async def get_admin_pvz(
         owner_id: int
 ):
 
-
     async with aiosqlite.connect(DATABASE) as db:
-
 
         cursor = await db.execute(
             """
@@ -876,8 +883,8 @@ async def get_admin_pvz(
 
             WHERE owner_id = ?
 
+            ORDER BY id
             """,
-
             (
                 owner_id,
             )
@@ -890,32 +897,159 @@ async def get_admin_pvz(
 
 
 
-
-async def get_pvz_employees(
-        pvz_id: int
+async def rename_pvz(
+        pvz_id: int,
+        name: str
 ):
 
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE pvz
+
+            SET name = ?
+
+            WHERE id = ?
+            """,
+            (
+                name,
+                pvz_id
+            )
+        )
+
+
+        await db.commit()
+
+
+
+
+
+async def delete_pvz(
+        pvz_id: int
+):
 
     async with aiosqlite.connect(DATABASE) as db:
 
 
-        cursor = await db.execute(
-            """
-            SELECT *
+        # удаляем сотрудников ПВЗ
 
-            FROM users
+        await db.execute(
+            """
+            DELETE FROM users
 
             WHERE pvz_id = ?
-
             """,
-
             (
                 pvz_id,
             )
         )
 
 
-        return await cursor.fetchall()
+        # удаляем сам ПВЗ
+
+        await db.execute(
+            """
+            DELETE FROM pvz
+
+            WHERE id = ?
+            """,
+            (
+                pvz_id,
+            )
+        )
+
+
+        await db.commit()
+
+
+
+
+
+async def set_pvz_owner(
+        pvz_id: int,
+        owner_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE pvz
+
+            SET owner_id = ?
+
+            WHERE id = ?
+            """,
+            (
+                owner_id,
+                pvz_id
+            )
+        )
+
+
+        await db.execute(
+            """
+            UPDATE users
+
+            SET
+                role = ?,
+                pvz_id = ?
+
+            WHERE telegram_id = ?
+            """,
+            (
+                ROLE_ADMIN,
+                pvz_id,
+                owner_id
+            )
+        )
+
+
+        await db.commit()
+
+
+
+
+
+async def remove_pvz_owner(
+        owner_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE users
+
+            SET
+                role = ?,
+                pvz_id = NULL
+
+            WHERE telegram_id = ?
+            """,
+            (
+                ROLE_EMPLOYEE,
+                owner_id
+            )
+        )
+
+
+        await db.execute(
+            """
+            UPDATE pvz
+
+            SET owner_id = NULL
+
+            WHERE owner_id = ?
+            """,
+            (
+                owner_id,
+            )
+        )
+
+
+        await db.commit()
 
 # ============================================================
 # SAVE TEST RESULT
