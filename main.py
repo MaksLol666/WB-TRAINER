@@ -499,25 +499,47 @@ async def get_pvz_owner(
 # ============================================================
 
 
-def employee_menu():
+def super_admin_menu():
 
     return ReplyKeyboardMarkup(
         keyboard=[
+
             [
                 KeyboardButton(
-                    text="📚 Начать тест"
+                    text="🏢 Все ПВЗ"
                 )
             ],
+
             [
                 KeyboardButton(
-                    text="📊 Мои результаты"
+                    text="👥 Владельцы ПВЗ"
                 )
             ],
+
             [
                 KeyboardButton(
-                    text="👤 Профиль"
+                    text="👤 Все сотрудники"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="📝 Управление тестами"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="📊 Общая статистика"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="➕ Создать ПВЗ"
                 )
             ]
+
         ],
         resize_keyboard=True
     )
@@ -530,31 +552,62 @@ def admin_menu():
 
     return ReplyKeyboardMarkup(
         keyboard=[
+
             [
                 KeyboardButton(
                     text="🏢 Мои ПВЗ"
                 )
             ],
+
             [
                 KeyboardButton(
                     text="👥 Сотрудники"
                 )
             ],
+
             [
                 KeyboardButton(
-                    text="📝 Управление тестами"
+                    text="📊 Статистика ПВЗ"
                 )
             ],
+
             [
                 KeyboardButton(
-                    text="📊 Статистика"
-                )
-            ],
-            [
-                KeyboardButton(
-                    text="➕ Создать ПВЗ"
+                    text="🔑 Код приглашения"
                 )
             ]
+
+        ],
+        resize_keyboard=True
+    )
+
+
+
+
+
+def employee_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+
+            [
+                KeyboardButton(
+                    text="📚 Начать тест"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="📊 Мои результаты"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="👤 Профиль"
+                )
+            ]
+
         ],
         resize_keyboard=True
     )
@@ -567,11 +620,69 @@ def registration_menu():
 
     return ReplyKeyboardMarkup(
         keyboard=[
+
             [
                 KeyboardButton(
                     text="🔑 Ввести код ПВЗ"
                 )
             ]
+
+        ],
+        resize_keyboard=True
+    )
+
+
+
+
+
+def owner_management_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+
+            [
+                KeyboardButton(
+                    text="👥 Добавить сотрудника"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="❌ Удалить сотрудника"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="⬅ Назад"
+                )
+            ]
+
+        ],
+        resize_keyboard=True
+    )
+
+
+
+
+
+def delete_confirm_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+
+            [
+                KeyboardButton(
+                    text="✅ Подтвердить"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="❌ Отмена"
+                )
+            ]
+
         ],
         resize_keyboard=True
     )
@@ -584,17 +695,18 @@ def back_menu():
 
     return ReplyKeyboardMarkup(
         keyboard=[
+
             [
                 KeyboardButton(
                     text="⬅ Назад"
                 )
             ]
+
         ],
         resize_keyboard=True
     )
 
-
-
+                    
 
 
 # ============================================================
