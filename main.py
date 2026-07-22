@@ -60,10 +60,10 @@ DATABASE = "wb_trainer.db"
 
 
 # ============================================================
-# CONSTANTS
+# ROLES
 # ============================================================
 
-
+ROLE_SUPER_ADMIN = "super_admin"
 ROLE_ADMIN = "admin"
 ROLE_EMPLOYEE = "employee"
 
