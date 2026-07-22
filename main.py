@@ -257,18 +257,64 @@ async def init_db():
 # ============================================================
 
 
-
 def generate_invite_code():
 
     return "WB-" + secrets.token_hex(3).upper()
 
 
-
-
-def is_admin(user_id: int):
+def is_super_admin(
+        user_id: int
+):
 
     return user_id in ADMINS
 
+
+async def is_admin(
+        telegram_id: int
+):
+
+    user = await get_user(
+        telegram_id
+    )
+
+    if not user:
+
+        return False
+
+    return user[4] == ROLE_ADMIN
+
+
+async def is_employee(
+        telegram_id: int
+):
+
+    user = await get_user(
+        telegram_id
+    )
+
+    if not user:
+
+        return False
+
+    return user[4] == ROLE_EMPLOYEE
+
+
+async def is_owner_of_pvz(
+        telegram_id: int,
+        pvz_id: int
+):
+
+    pvzs = await get_admin_pvz(
+        telegram_id
+    )
+
+    for pvz in pvzs:
+
+        if pvz[0] == pvz_id:
+
+            return True
+
+    return False
 
 
 
