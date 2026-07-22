@@ -136,6 +136,16 @@ class TestState(StatesGroup):
 
 
 
+class DeleteState(StatesGroup):
+
+    waiting_employee_id = State()
+
+    waiting_pvz_id = State()
+
+    confirm_delete = State()
+
+
+
 
 # ============================================================
 # DATABASE INIT
@@ -2262,6 +2272,332 @@ async def start_test(
         "Следующий этап — добавление базы вопросов WB."
     )
 
+
+# ============================================================
+# DELETE EMPLOYEE + DELETE PVZ
+# ============================================================
+
+
+@router.message(
+    F.text == "❌ Удалить сотрудника"
+)
+async def delete_employee_start(
+        message: Message,
+        state: FSMContext
+):
+
+
+    user = await get_user(
+        message.from_user.id
+    )
+
+
+    if not user:
+
+
+        await message.answer(
+            "❌ Пользователь не найден."
+        )
+
+        return
+
+
+
+    if user[4] not in [
+        ROLE_ADMIN,
+        ROLE_SUPER_ADMIN
+    ]:
+
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
+
+    await message.answer(
+        "Введите Telegram ID сотрудника, которого нужно удалить:"
+    )
+
+
+    await state.set_state(
+        DeleteState.waiting_employee_id
+    )
+
+
+
+
+
+@router.message(
+    DeleteState.waiting_employee_id
+)
+async def delete_employee_confirm(
+        message: Message,
+        state: FSMContext
+):
+
+
+    try:
+
+        employee_id = int(
+            message.text
+        )
+
+    except:
+
+
+        await message.answer(
+            "❌ ID должен быть числом."
+        )
+
+        return
+
+
+
+
+    employee = await get_user(
+        employee_id
+    )
+
+
+
+    if not employee:
+
+
+        await message.answer(
+            "❌ Пользователь не найден."
+        )
+
+        await state.clear()
+
+        return
+
+
+
+
+    current_user = await get_user(
+        message.from_user.id
+    )
+
+
+
+    # владелец может удалять только своих
+
+    if current_user[4] == ROLE_ADMIN:
+
+
+        if employee[5] != current_user[5]:
+
+
+            await message.answer(
+                "❌ Этот сотрудник не относится к вашему ПВЗ."
+            )
+
+            await state.clear()
+
+            return
+
+
+
+
+    await state.update_data(
+        delete_employee_id=employee_id
+    )
+
+
+
+    username = employee[3]
+
+
+    if username:
+
+        name = "@" + username
+
+    else:
+
+        name = employee[2]
+
+
+
+    await message.answer(
+        "⚠️ Подтвердите удаление:\n\n"
+        f"👤 {name}\n"
+        f"ID: <code>{employee_id}</code>",
+        reply_markup=delete_confirm_menu()
+    )
+
+
+    await state.set_state(
+        DeleteState.confirm_delete
+    )
+
+
+
+
+
+@router.message(
+    DeleteState.confirm_delete,
+    F.text == "✅ Подтвердить"
+)
+async def delete_employee_apply(
+        message: Message,
+        state: FSMContext
+):
+
+
+    data = await state.get_data()
+
+
+    employee_id = data.get(
+        "delete_employee_id"
+    )
+
+
+
+    if employee_id:
+
+
+        await delete_employee(
+            employee_id
+        )
+
+
+
+    await state.clear()
+
+
+
+    await message.answer(
+        "✅ Сотрудник удалён.",
+        reply_markup=admin_menu()
+    )
+
+
+
+
+
+@router.message(
+    DeleteState.confirm_delete,
+    F.text == "❌ Отмена"
+)
+async def delete_cancel(
+        message: Message,
+        state: FSMContext
+):
+
+
+    await state.clear()
+
+
+    await message.answer(
+        "❌ Удаление отменено."
+    )
+
+
+
+
+
+# ============================================================
+# DELETE PVZ (SUPER ADMIN)
+# ============================================================
+
+
+@router.message(
+    F.text == "🗑 Удалить ПВЗ"
+)
+async def delete_pvz_start(
+        message: Message,
+        state: FSMContext
+):
+
+
+    if not is_super_admin(
+        message.from_user.id
+    ):
+
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
+    await message.answer(
+        "Введите ID ПВЗ для удаления:"
+    )
+
+
+    await state.set_state(
+        DeleteState.waiting_pvz_id
+    )
+
+
+
+
+
+@router.message(
+    DeleteState.waiting_pvz_id
+)
+async def delete_pvz_apply(
+        message: Message,
+        state: FSMContext
+):
+
+
+    try:
+
+        pvz_id = int(
+            message.text
+        )
+
+    except:
+
+
+        await message.answer(
+            "❌ ID должен быть числом."
+        )
+
+        return
+
+
+
+
+    pvz = await get_pvz_by_id(
+        pvz_id
+    )
+
+
+    if not pvz:
+
+
+        await message.answer(
+            "❌ ПВЗ не найден."
+        )
+
+        await state.clear()
+
+        return
+
+
+
+
+    await delete_pvz(
+        pvz_id
+    )
+
+
+    await state.clear()
+
+
+    await message.answer(
+        "🗑 ПВЗ удалён.",
+        reply_markup=super_admin_menu()
+        )
 
 
 
