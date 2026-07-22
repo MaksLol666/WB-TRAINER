@@ -2646,6 +2646,197 @@ async def delete_pvz_apply(
         )
 
 
+# ============================================================
+# ASSIGN PVZ OWNER
+# ============================================================
+
+class AssignOwnerState(StatesGroup):
+
+    waiting_user_id = State()
+
+    waiting_pvz_id = State()
+
+
+@router.message(
+    F.text == "👥 Владельцы ПВЗ"
+)
+async def owners_menu(
+        message: Message,
+        state: FSMContext
+):
+
+    if not is_super_admin(
+        message.from_user.id
+    ):
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+    await state.clear()
+
+    admins = await get_all_admins()
+
+    text = "👥 <b>Владельцы ПВЗ</b>\n\n"
+
+    if admins:
+
+        for admin in admins:
+
+            pvz_name = "Не назначен"
+
+            if admin[5]:
+
+                pvz = await get_pvz_by_id(admin[5])
+
+                if pvz:
+                    pvz_name = pvz[1]
+
+            username = (
+                f"@{admin[3]}"
+                if admin[3]
+                else admin[2]
+            )
+
+            text += (
+                f"{username}\n"
+                f"ID: <code>{admin[1]}</code>\n"
+                f"ПВЗ: {pvz_name}\n\n"
+            )
+
+    else:
+
+        text += "Пока владельцев нет.\n\n"
+
+    text += (
+        "Отправьте Telegram ID пользователя, "
+        "которого нужно сделать владельцем ПВЗ."
+    )
+
+    await message.answer(text)
+
+    await state.set_state(
+        AssignOwnerState.waiting_user_id
+    )
+
+
+@router.message(
+    AssignOwnerState.waiting_user_id
+)
+async def assign_owner_user(
+        message: Message,
+        state: FSMContext
+):
+
+    try:
+        telegram_id = int(message.text)
+    except:
+        await message.answer(
+            "❌ ID должен быть числом."
+        )
+        return
+
+    user = await get_user(
+        telegram_id
+    )
+
+    if not user:
+
+        await message.answer(
+            "❌ Пользователь не найден."
+        )
+        return
+
+    await state.update_data(
+        owner_id=telegram_id
+    )
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+            FROM pvz
+            ORDER BY id
+            """
+        )
+
+        pvzs = await cursor.fetchall()
+
+    if not pvzs:
+
+        await message.answer(
+            "❌ В системе нет ПВЗ."
+        )
+
+        await state.clear()
+
+        return
+
+    text = (
+        "Введите ID ПВЗ.\n\n"
+        "Доступные ПВЗ:\n\n"
+    )
+
+    for pvz in pvzs:
+
+        text += (
+            f"{pvz[0]} — {pvz[1]}\n"
+        )
+
+    await message.answer(text)
+
+    await state.set_state(
+        AssignOwnerState.waiting_pvz_id
+    )
+
+
+@router.message(
+    AssignOwnerState.waiting_pvz_id
+)
+async def assign_owner_finish(
+        message: Message,
+        state: FSMContext
+):
+
+    try:
+        pvz_id = int(message.text)
+    except:
+        await message.answer(
+            "❌ ID ПВЗ должен быть числом."
+        )
+        return
+
+    pvz = await get_pvz_by_id(
+        pvz_id
+    )
+
+    if not pvz:
+
+        await message.answer(
+            "❌ ПВЗ не найден."
+        )
+
+        return
+
+    data = await state.get_data()
+
+    owner_id = data["owner_id"]
+
+    await set_pvz_owner(
+        pvz_id,
+        owner_id
+    )
+
+    await state.clear()
+
+    await message.answer(
+        "✅ Владелец успешно назначен.",
+        reply_markup=super_admin_menu()
+    )
+    
 
 
 # ============================================================
