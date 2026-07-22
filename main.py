@@ -2838,6 +2838,127 @@ async def assign_owner_finish(
     )
     
 
+# ============================================================
+# REMOVE PVZ OWNER
+# ============================================================
+
+class RemoveOwnerState(StatesGroup):
+
+    waiting_owner_id = State()
+
+
+@router.message(
+    F.text == "🚫 Снять владельца"
+)
+async def remove_owner_start(
+        message: Message,
+        state: FSMContext
+):
+
+    if not is_super_admin(message.from_user.id):
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+    admins = await get_all_admins()
+
+    if not admins:
+
+        await message.answer(
+            "Владельцев ПВЗ пока нет."
+        )
+
+        return
+
+    text = "👥 <b>Владельцы ПВЗ</b>\n\n"
+
+    for admin in admins:
+
+        username = (
+            f"@{admin[3]}"
+            if admin[3]
+            else admin[2]
+        )
+
+        pvz_name = "Не назначен"
+
+        if admin[5]:
+
+            pvz = await get_pvz_by_id(admin[5])
+
+            if pvz:
+
+                pvz_name = pvz[1]
+
+        text += (
+            f"{username}\n"
+            f"ID: <code>{admin[1]}</code>\n"
+            f"ПВЗ: {pvz_name}\n\n"
+        )
+
+    text += "Введите Telegram ID владельца:"
+
+    await message.answer(text)
+
+    await state.set_state(
+        RemoveOwnerState.waiting_owner_id
+    )
+
+
+@router.message(
+    RemoveOwnerState.waiting_owner_id
+)
+async def remove_owner_finish(
+        message: Message,
+        state: FSMContext
+):
+
+    try:
+
+        owner_id = int(message.text)
+
+    except:
+
+        await message.answer(
+            "❌ ID должен быть числом."
+        )
+
+        return
+
+    user = await get_user(owner_id)
+
+    if not user:
+
+        await message.answer(
+            "❌ Пользователь не найден."
+        )
+
+        await state.clear()
+
+        return
+
+    if user[4] != ROLE_ADMIN:
+
+        await message.answer(
+            "❌ Этот пользователь не является владельцем ПВЗ."
+        )
+
+        await state.clear()
+
+        return
+
+    await remove_pvz_owner(owner_id)
+
+    await state.clear()
+
+    await message.answer(
+        "✅ Владелец снят с ПВЗ.",
+        reply_markup=super_admin_menu()
+    )
+    
 
 # ============================================================
 # ERROR SAFE HANDLER
