@@ -706,28 +706,23 @@ def back_menu():
         resize_keyboard=True
     )
 
-                    
-
 
 # ============================================================
-# ADMIN USER CREATION
+# SUPER ADMIN USER CREATION
 # ============================================================
 
 
-async def create_admin_user(
+async def create_super_admin_user(
         telegram_id: int,
         full_name: str,
         username: str | None
 ):
 
-
     async with aiosqlite.connect(DATABASE) as db:
-
 
         await db.execute(
             """
             INSERT OR IGNORE INTO users
-
             (
                 telegram_id,
                 full_name,
@@ -738,14 +733,12 @@ async def create_admin_user(
             )
 
             VALUES (?, ?, ?, ?, ?, ?)
-
             """,
-
             (
                 telegram_id,
                 full_name,
                 username,
-                ROLE_ADMIN,
+                ROLE_SUPER_ADMIN,
                 None,
                 datetime.now().isoformat()
             )
@@ -758,18 +751,15 @@ async def create_admin_user(
 
 
 
-
-async def ensure_admin_exists(
+async def ensure_super_admin_exists(
         telegram_id: int,
         full_name: str,
         username: str | None
 ):
 
-
-    if not is_admin(telegram_id):
+    if not is_super_admin(telegram_id):
 
         return
-
 
 
     user = await get_user(
@@ -779,8 +769,7 @@ async def ensure_admin_exists(
 
     if user is None:
 
-
-        await create_admin_user(
+        await create_super_admin_user(
             telegram_id,
             full_name,
             username
@@ -788,9 +777,86 @@ async def ensure_admin_exists(
 
 
 
+
+
 # ============================================================
 # SUPER ADMIN FUNCTIONS
 # ============================================================
+
+
+
+async def get_all_users():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            ORDER BY id
+            """
+        )
+
+
+        return await cursor.fetchall()
+
+
+
+
+
+async def get_all_admins():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            WHERE role = ?
+
+            ORDER BY id
+            """,
+            (
+                ROLE_ADMIN,
+            )
+        )
+
+
+        return await cursor.fetchall()
+
+
+
+
+
+async def get_all_super_admins():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM users
+
+            WHERE role = ?
+
+            ORDER BY id
+            """,
+            (
+                ROLE_SUPER_ADMIN,
+            )
+        )
+
+
+        return await cursor.fetchall()
+
+
+
+
 
 async def change_user_role(
         telegram_id: int,
@@ -813,10 +879,14 @@ async def change_user_role(
             )
         )
 
+
         await db.commit()
 
 
-async def assign_admin_to_pvz(
+
+
+
+async def assign_owner_to_pvz(
         telegram_id: int,
         pvz_id: int
 ):
@@ -840,10 +910,72 @@ async def assign_admin_to_pvz(
             )
         )
 
+
+        await db.execute(
+            """
+            UPDATE pvz
+
+            SET owner_id = ?
+
+            WHERE id = ?
+            """,
+            (
+                telegram_id,
+                pvz_id
+            )
+        )
+
+
         await db.commit()
 
 
-async def remove_employee(
+
+
+
+async def remove_owner_from_pvz(
+        telegram_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        await db.execute(
+            """
+            UPDATE users
+
+            SET
+                role = ?,
+                pvz_id = NULL
+
+            WHERE telegram_id = ?
+            """,
+            (
+                ROLE_EMPLOYEE,
+                telegram_id
+            )
+        )
+
+
+        await db.execute(
+            """
+            UPDATE pvz
+
+            SET owner_id = NULL
+
+            WHERE owner_id = ?
+            """,
+            (
+                telegram_id
+            )
+        )
+
+
+        await db.commit()
+
+
+
+
+
+async def delete_employee(
         telegram_id: int
 ):
 
@@ -854,35 +986,18 @@ async def remove_employee(
             DELETE FROM users
 
             WHERE telegram_id = ?
+
+            AND role = ?
             """,
             (
                 telegram_id,
+                ROLE_EMPLOYEE
             )
         )
+
 
         await db.commit()
 
-
-async def get_all_admins():
-
-    async with aiosqlite.connect(DATABASE) as db:
-
-        cursor = await db.execute(
-            """
-            SELECT *
-
-            FROM users
-
-            WHERE role = ?
-
-            ORDER BY id
-            """,
-            (
-                ROLE_ADMIN,
-            )
-        )
-
-        return await cursor.fetchall()
 
 # ============================================================
 # PVZ DATABASE
