@@ -1393,7 +1393,9 @@ async def start_command(
     username = message.from_user.username
 
 
-    await ensure_admin_exists(
+    # создаём супер админа при первом входе
+
+    await ensure_super_admin_exists(
         telegram_id,
         full_name,
         username
@@ -1405,23 +1407,35 @@ async def start_command(
     )
 
 
+
     if user:
 
 
         role = user[4]
 
 
-        if role == ROLE_ADMIN:
+
+        if role == ROLE_SUPER_ADMIN:
 
 
             await message.answer(
                 "👑 <b>WB TRAINER</b>\n\n"
                 "Вы вошли как главный администратор.",
+                reply_markup=super_admin_menu()
+            )
+
+
+        elif role == ROLE_ADMIN:
+
+
+            await message.answer(
+                "🏢 <b>WB TRAINER</b>\n\n"
+                "Вы вошли как владелец ПВЗ.",
                 reply_markup=admin_menu()
             )
 
 
-        else:
+        elif role == ROLE_EMPLOYEE:
 
 
             await message.answer(
@@ -1453,11 +1467,9 @@ async def start_command(
 
 
 
-
 # ============================================================
 # EMPLOYEE REGISTRATION
 # ============================================================
-
 
 
 @router.message(
@@ -1468,7 +1480,6 @@ async def register_by_code(
         state: FSMContext
 ):
 
-
     code = message.text.strip().upper()
 
 
@@ -1476,6 +1487,7 @@ async def register_by_code(
     pvz = await get_pvz_by_code(
         code
     )
+
 
 
     if not pvz:
@@ -1498,7 +1510,6 @@ async def register_by_code(
 
 
 
-
     await add_user(
         telegram_id,
         full_name,
@@ -1515,13 +1526,10 @@ async def register_by_code(
 
     await message.answer(
         "✅ Регистрация успешно завершена!\n\n"
+        f"📍 ПВЗ: <b>{pvz[1]}</b>\n\n"
         "Теперь вы можете проходить обучение.",
         reply_markup=employee_menu()
     )
-
-
-
-
 
 
 # ============================================================
