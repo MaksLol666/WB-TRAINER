@@ -1537,7 +1537,6 @@ async def register_by_code(
 # ============================================================
 
 
-
 @router.message(
     F.text == "➕ Создать ПВЗ"
 )
@@ -1547,17 +1546,16 @@ async def create_pvz_start(
 ):
 
 
-    if not is_admin(
+    if not is_super_admin(
         message.from_user.id
     ):
 
 
         await message.answer(
-            "❌ Нет доступа."
+            "❌ Создавать ПВЗ может только главный администратор."
         )
 
         return
-
 
 
 
@@ -1575,7 +1573,6 @@ async def create_pvz_start(
 
 
 
-
 @router.message(
     CreatePVZState.waiting_name
 )
@@ -1585,7 +1582,34 @@ async def create_pvz_finish(
 ):
 
 
+    if not is_super_admin(
+        message.from_user.id
+    ):
+
+
+        await state.clear()
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+
     name = message.text.strip()
+
+
+
+    if len(name) < 2:
+
+
+        await message.answer(
+            "❌ Название слишком короткое."
+        )
+
+        return
+
 
 
 
@@ -1602,15 +1626,14 @@ async def create_pvz_finish(
 
     await message.answer(
         "✅ <b>ПВЗ создан!</b>\n\n"
-        f"📍 {name}\n"
+        f"📍 Название:\n"
+        f"<b>{name}</b>\n\n"
+        f"🆔 ID ПВЗ: <code>{pvz_id}</code>\n\n"
         f"🔑 Код сотрудников:\n"
-        f"<code>{code}</code>",
-        reply_markup=admin_menu()
+        f"<code>{code}</code>\n\n"
+        "Передайте этот код сотрудникам для регистрации.",
+        reply_markup=super_admin_menu()
     )
-
-
-
-
 
 
 # ============================================================
