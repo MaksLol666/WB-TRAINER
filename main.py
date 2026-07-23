@@ -2150,72 +2150,172 @@ async def employees_list(
         "❌ Нет доступа."
     )
 
+
 # ============================================================
-# RESULTS
+# STATISTICS
 # ============================================================
+
+
+async def get_system_statistics():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM pvz"
+        )
+        pvz_count = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*)
+
+            FROM users
+
+            WHERE role = ?
+            """,
+            (
+                ROLE_ADMIN,
+            )
+        )
+        owners_count = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*)
+
+            FROM users
+
+            WHERE role = ?
+            """,
+            (
+                ROLE_EMPLOYEE,
+            )
+        )
+        employees_count = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*)
+
+            FROM results
+            """
+        )
+        tests_count = (await cursor.fetchone())[0]
+
+        return (
+            pvz_count,
+            owners_count,
+            employees_count,
+            tests_count
+        )
+
+
 
 
 @router.message(
-    F.text == "📊 Мои результаты"
+    F.text == "📊 Общая статистика"
 )
-async def my_results(
+async def system_statistics(
         message: Message
 ):
-
 
     user = await get_user(
         message.from_user.id
     )
 
-
     if not user:
 
+        return
+
+    if user[4] != ROLE_SUPER_ADMIN:
 
         await message.answer(
-            "❌ Вы не зарегистрированы."
+            "❌ Нет доступа."
         )
 
         return
 
 
-
-    results = await get_user_results(
-        user[0]
-    )
-
-
-
-    if not results:
-
-
-        await message.answer(
-            "📊 У вас пока нет результатов тестов."
-        )
-
-        return
-
+    pvz_count, owners_count, employees_count, tests_count = await get_system_statistics()
 
 
     text = (
-        "📊 <b>Ваши результаты:</b>\n\n"
+        "📊 <b>Статистика WB TRAINER</b>\n\n"
+
+        f"🏢 Всего ПВЗ: <b>{pvz_count}</b>\n"
+        f"👑 Владельцев ПВЗ: <b>{owners_count}</b>\n"
+        f"👥 Сотрудников: <b>{employees_count}</b>\n"
+        f"📝 Пройдено тестов: <b>{tests_count}</b>\n\n"
+
+        f"👥 Всего пользователей: "
+        f"<b>{owners_count + employees_count + 1}</b>"
     )
-
-
-
-    for result in results:
-
-
-        text += (
-            f"🏆 Баллы: {result[2]}\n"
-            f"✅ Правильных: {result[3]}/{result[4]}\n"
-            f"📅 {result[5][:10]}\n\n"
-        )
-
 
 
     await message.answer(
         text,
-        reply_markup=employee_menu()
+        reply_markup=super_admin_menu()
+    )
+
+
+
+
+@router.message(
+    F.text == "📊 Статистика ПВЗ"
+)
+async def owner_statistics(
+        message: Message
+):
+
+    user = await get_user(
+        message.from_user.id
+    )
+
+    if not user:
+
+        return
+
+    if user[4] != ROLE_ADMIN:
+
+        await message.answer(
+            "❌ Нет доступа."
+        )
+
+        return
+
+
+    pvzs = await get_admin_pvz(
+        message.from_user.id
+    )
+
+    if not pvzs:
+
+        await message.answer(
+            "У вас нет ПВЗ."
+        )
+
+        return
+
+
+    text = "📊 <b>Статистика ваших ПВЗ</b>\n\n"
+
+
+    for pvz in pvzs:
+
+        employees = await get_pvz_employees_only(
+            pvz[0]
+        )
+
+        text += (
+            f"🏢 <b>{pvz[1]}</b>\n"
+            f"👥 Сотрудников: {len(employees)}\n"
+            f"🔑 Код: <code>{pvz[2]}</code>\n\n"
+        )
+
+
+    await message.answer(
+        text,
+        reply_markup=admin_menu()
     )
 
 
