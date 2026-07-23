@@ -1334,6 +1334,354 @@ async def remove_pvz_owner(
 
         await db.commit()
 
+
+# ============================================================
+# QUESTION DATABASE
+# ============================================================
+
+
+async def add_question(
+        category: str,
+        difficulty: int,
+        question_type: str,
+        question: str,
+        answers: str,
+        correct_answers: str,
+        explanation: str,
+        weight: int = 1
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            INSERT INTO questions
+            (
+                category,
+                difficulty,
+                type,
+                question,
+                answers,
+                correct_answers,
+                explanation,
+                weight,
+                created_at
+            )
+
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                category,
+                difficulty,
+                question_type,
+                question,
+                answers,
+                correct_answers,
+                explanation,
+                weight,
+                datetime.now().isoformat()
+            )
+        )
+
+        await db.commit()
+
+        return cursor.lastrowid
+        
+        async def update_question(
+        question_id: int,
+        category: str,
+        difficulty: int,
+        question_type: str,
+        question: str,
+        answers: str,
+        correct_answers: str,
+        explanation: str,
+        weight: int = 1
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            UPDATE questions
+
+            SET
+                category = ?,
+                difficulty = ?,
+                type = ?,
+                question = ?,
+                answers = ?,
+                correct_answers = ?,
+                explanation = ?,
+                weight = ?
+
+            WHERE id = ?
+            """,
+            (
+                category,
+                difficulty,
+                question_type,
+                question,
+                answers,
+                correct_answers,
+                explanation,
+                weight,
+                question_id
+            )
+        )
+
+        await db.commit()
+
+        return cursor.rowcount > 0
+
+async def delete_question(
+        question_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            DELETE FROM questions
+
+            WHERE id = ?
+            """,
+            (
+                question_id,
+            )
+        )
+
+        await db.commit()
+
+        return cursor.rowcount > 0
+        
+        
+async def get_question(
+        question_id: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM questions
+
+            WHERE id = ?
+            """,
+            (
+                question_id,
+            )
+        )
+
+        return await cursor.fetchone()
+
+
+
+
+async def question_exists(
+        question_id: int
+):
+
+    question = await get_question(
+        question_id
+    )
+
+    return question is not None
+
+
+async def get_all_questions():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM questions
+
+            ORDER BY
+                category,
+                difficulty,
+                id
+            """
+        )
+
+        return await cursor.fetchall()
+
+
+
+
+async def get_questions_count():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*)
+
+            FROM questions
+            """
+        )
+
+        result = await cursor.fetchone()
+
+        return result[0]
+
+
+
+
+async def get_categories():
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT DISTINCT category
+
+            FROM questions
+
+            ORDER BY category
+            """
+        )
+
+        rows = await cursor.fetchall()
+
+        return [row[0] for row in rows]
+
+
+async def get_questions_by_category(
+        category: str
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM questions
+
+            WHERE category = ?
+
+            ORDER BY difficulty, id
+            """,
+            (
+                category,
+            )
+        )
+
+        return await cursor.fetchall()
+
+
+
+
+async def get_random_questions(
+        limit: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM questions
+
+            ORDER BY RANDOM()
+
+            LIMIT ?
+            """,
+            (
+                limit,
+            )
+        )
+
+        return await cursor.fetchall()
+
+
+
+
+async def get_random_questions_by_category(
+        category: str,
+        limit: int
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM questions
+
+            WHERE category = ?
+
+            ORDER BY RANDOM()
+
+            LIMIT ?
+            """,
+            (
+                category,
+                limit
+            )
+        )
+
+        return await cursor.fetchall()
+
+
+
+
+async def get_questions_by_type(
+        question_type: str
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM questions
+
+            WHERE type = ?
+
+            ORDER BY difficulty, id
+            """,
+            (
+                question_type,
+            )
+        )
+
+        return await cursor.fetchall()
+
+
+
+
+async def search_questions(
+        text: str
+):
+
+    async with aiosqlite.connect(DATABASE) as db:
+
+        cursor = await db.execute(
+            """
+            SELECT *
+
+            FROM questions
+
+            WHERE question LIKE ?
+
+            ORDER BY id
+            """,
+            (
+                f"%{text}%",
+            )
+        )
+
+        return await cursor.fetchall()
+
 # ============================================================
 # SAVE TEST RESULT
 # ============================================================
