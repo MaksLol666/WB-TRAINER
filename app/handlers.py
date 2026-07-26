@@ -1,15 +1,18 @@
+import random
+
 import aiosqlite
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import DATABASE
 from app.constants import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPER_ADMIN
 from app.database import *
 from app.keyboards import *
-from app.states import CreatePVZState, DeleteState, RegisterState
+from app.questions_bank import build_test, get_categories as get_bank_categories
+from app.states import CreatePVZState, DeleteState, RegisterState, TestState
 
 router = Router()
 
@@ -1029,13 +1032,19 @@ async def my_results(
         await message.answer("📊 У вас пока нет результатов тестов.")
         return
 
-    text = "📊 <b>Мои результаты</b>\n\n"
+    text = "📊 <b>Мои результаты</b>\n\nПоследние тесты:\n\n"
 
     for result in results[:10]:
+        category = result[3] or "Полный тест"
+        score = result[4]
+        correct = result[5]
+        total = result[6]
+        created_at = result[7]
         text += (
-            f"Дата: {result[5][:10]}\n"
-            f"Балл: <b>{result[2]}</b>\n"
-            f"Верно: {result[3]} из {result[4]}\n\n"
+            f"Дата: {created_at[:10]}\n"
+            f"Категория: <b>{category}</b>\n"
+            f"Результат: {correct}/{total}\n"
+            f"Процент: <b>{score}%</b>\n\n"
         )
 
     await message.answer(text, reply_markup=employee_menu())
@@ -1070,18 +1079,226 @@ async def tests_management(
 # ============================================================
 
 
+def test_mode_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📚 Обучение по категории", callback_data="test:mode:category")],
+            [InlineKeyboardButton(text="🎯 Полный тест", callback_data="test:mode:full")],
+        ]
+    )
+
+
+def categories_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=category, callback_data=f"test:category:{index}")]
+            for index, category in enumerate(get_bank_categories())
+        ]
+    )
+
+
+def answer_keyboard(question_index: int, answers: list[str], selected: set[int] | None = None, is_multiple: bool = False):
+    selected = selected or set()
+    keyboard = []
+    for index, answer in enumerate(answers):
+        prefix = "☑ " if index in selected else ""
+        keyboard.append([InlineKeyboardButton(text=f"{prefix}{chr(65 + index)}) {answer}", callback_data=f"test:answer:{question_index}:{index}")])
+    if is_multiple:
+        keyboard.append([InlineKeyboardButton(text="✅ Проверить ответ", callback_data=f"test:check:{question_index}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def next_question_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➡ Следующий вопрос", callback_data="test:next")]])
+
+
+def _question_payload(question):
+    order = list(range(len(question.answers)))
+    random.shuffle(order)
+    correct = [order.index(index) for index in question.correct_indexes if index in order]
+    return {
+        "id": question.id,
+        "category": question.category,
+        "type": question.type,
+        "text": question.text,
+        "answers": [question.answers[index] for index in order],
+        "correct": correct,
+        "explanation": question.explanation,
+        "is_multiple": question.is_multiple,
+    }
+
+
+def _score_text(percent: int) -> str:
+    if percent >= 90:
+        return "🔥 Отличное знание работы ПВЗ"
+    if percent >= 70:
+        return "👍 Хороший результат"
+    if percent >= 50:
+        return "⚠ Нужно повторить материал"
+    return "❌ Требуется обучение"
+
+
+async def _send_question(message: Message, state: FSMContext):
+    data = await state.get_data()
+    questions = data["questions"]
+    current = data["current"]
+    question = questions[current]
+    await state.update_data(answered=False, selected=[])
+    text = f"Вопрос {current + 1}/{len(questions)}\n\n<b>{question['text']}</b>"
+    if question["is_multiple"]:
+        text += "\n\nВыберите один или несколько вариантов:"
+    await message.answer(
+        text,
+        reply_markup=answer_keyboard(current, question["answers"], is_multiple=question["is_multiple"]),
+    )
+
+
 @router.message(
     F.text == "📚 Начать тест"
 )
 async def start_test(
-        message: Message
+        message: Message,
+        state: FSMContext
 ):
+    user = await get_user(message.from_user.id)
+
+    if not user or user[4] != ROLE_EMPLOYEE:
+        await message.answer("❌ Тестирование доступно только сотрудникам.")
+        return
+
+    await state.clear()
+    await message.answer("Выберите режим тестирования:", reply_markup=test_mode_keyboard())
 
 
-    await message.answer(
-        "📝 Тестовая система пока в разработке.\n\n"
-        "Следующий этап — добавление базы вопросов WB."
+@router.callback_query(F.data == "test:mode:category")
+async def choose_test_category(callback: CallbackQuery):
+    categories = get_bank_categories()
+    if not categories:
+        await callback.message.answer("❌ В базе пока нет вопросов для обучения.")
+        await callback.answer()
+        return
+    await callback.message.edit_text("Выберите категорию:", reply_markup=categories_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "test:mode:full")
+async def start_full_test(callback: CallbackQuery, state: FSMContext):
+    await _start_selected_test(callback, state, None)
+
+
+@router.callback_query(F.data.startswith("test:category:"))
+async def start_category_test(callback: CallbackQuery, state: FSMContext):
+    categories = get_bank_categories()
+    index = int(callback.data.split(":")[-1])
+    if index >= len(categories):
+        await callback.answer("Категория не найдена", show_alert=True)
+        return
+    await _start_selected_test(callback, state, categories[index])
+
+
+async def _start_selected_test(callback: CallbackQuery, state: FSMContext, category: str | None):
+    questions = build_test(category)
+    if not questions:
+        await callback.message.answer("❌ Для выбранного режима нет вопросов.")
+        await callback.answer()
+        return
+    await state.set_state(TestState.answering)
+    await state.update_data(
+        category=category or "Полный тест",
+        questions=[_question_payload(question) for question in questions],
+        current=0,
+        correct_count=0,
+        answered=False,
+        selected=[],
     )
+    await callback.message.edit_text("✅ Тест сформирован. Вопросы и ответы перемешаны.")
+    await _send_question(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(TestState.answering, F.data.startswith("test:answer:"))
+async def answer_test_question(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if data.get("answered"):
+        await callback.answer("Нажмите «Следующий вопрос».", show_alert=True)
+        return
+    _, _, question_index, answer_index = callback.data.split(":")
+    question_index = int(question_index)
+    answer_index = int(answer_index)
+    question = data["questions"][question_index]
+    selected = set(data.get("selected", []))
+    if question["is_multiple"]:
+        selected.symmetric_difference_update({answer_index})
+        await state.update_data(selected=list(selected))
+        await callback.message.edit_reply_markup(reply_markup=answer_keyboard(question_index, question["answers"], selected, True))
+        await callback.answer()
+        return
+    await _finish_answer(callback, state, {answer_index})
+
+
+@router.callback_query(TestState.answering, F.data.startswith("test:check:"))
+async def check_multiple_answer(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    selected = set(data.get("selected", []))
+    if not selected:
+        await callback.answer("Сначала выберите ответ.", show_alert=True)
+        return
+    await _finish_answer(callback, state, selected)
+
+
+async def _finish_answer(callback: CallbackQuery, state: FSMContext, selected: set[int]):
+    data = await state.get_data()
+    current = data["current"]
+    question = data["questions"][current]
+    correct = set(question["correct"])
+    is_correct = selected == correct
+    correct_count = data["correct_count"] + (1 if is_correct else 0)
+    await state.update_data(answered=True, correct_count=correct_count)
+    correct_text = ", ".join(f"{chr(65 + index)}) {question['answers'][index]}" for index in sorted(correct))
+    result_title = "✅ Правильно!" if is_correct else "❌ Неправильно!"
+    await callback.message.edit_text(
+        f"{result_title}\n\n"
+        f"Правильный ответ: <b>{correct_text}</b>\n\n"
+        f"Объяснение: {question['explanation']}",
+        reply_markup=next_question_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(TestState.answering, F.data == "test:next")
+async def next_test_question(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if not data.get("answered"):
+        await callback.answer("Сначала ответьте на вопрос.", show_alert=True)
+        return
+    next_index = data["current"] + 1
+    if next_index >= len(data["questions"]):
+        await _finish_test(callback, state)
+        return
+    await state.update_data(current=next_index, answered=False, selected=[])
+    await _send_question(callback.message, state)
+    await callback.answer()
+
+
+async def _finish_test(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    user = await get_user(callback.from_user.id)
+    total = len(data["questions"])
+    correct = data["correct_count"]
+    percent = round(correct / total * 100) if total else 0
+    await save_result(user[0], percent, correct, total, data["category"], user[5])
+    await state.clear()
+    await callback.message.answer(
+        "📊 <b>Результат теста</b>\n\n"
+        f"Категория: <b>{data['category']}</b>\n"
+        f"Всего вопросов: {total}\n"
+        f"Правильных: {correct}\n"
+        f"Ошибок: {total - correct}\n"
+        f"Процент: {percent}%\n\n"
+        f"Оценка:\n{_score_text(percent)}",
+        reply_markup=employee_menu(),
+    )
+    await callback.answer()
 
 
 # ============================================================
