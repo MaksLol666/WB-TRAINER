@@ -59,13 +59,25 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS results(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
+            pvz_id INTEGER,
+            category TEXT,
             score INTEGER,
             correct_answers INTEGER,
             total_questions INTEGER,
             created_at TEXT
         )
         """)
+        await _ensure_results_columns(db)
         await db.commit()
+
+
+async def _ensure_results_columns(db):
+    cursor = await db.execute("PRAGMA table_info(results)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if "pvz_id" not in columns:
+        await db.execute("ALTER TABLE results ADD COLUMN pvz_id INTEGER")
+    if "category" not in columns:
+        await db.execute("ALTER TABLE results ADD COLUMN category TEXT")
 
 
 async def fetchone(query: str, params=()):
@@ -292,15 +304,20 @@ async def search_questions(text: str):
     return await fetchall("SELECT * FROM questions WHERE question LIKE ? ORDER BY id", (f"%{text}%",))
 
 
-async def save_result(user_id: int, score: int, correct: int, total: int):
+async def save_result(user_id: int, score: int, correct: int, total: int, category: str = "Полный тест", pvz_id: int | None = None):
     await execute(
-        "INSERT INTO results(user_id, score, correct_answers, total_questions, created_at) VALUES (?, ?, ?, ?, ?)",
-        (user_id, score, correct, total, _now()),
+        """INSERT INTO results(user_id, pvz_id, category, score, correct_answers, total_questions, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, pvz_id, category, score, correct, total, _now()),
     )
 
 
 async def get_user_results(user_id: int):
-    return await fetchall("SELECT * FROM results WHERE user_id = ? ORDER BY id DESC", (user_id,))
+    return await fetchall(
+        """SELECT id, user_id, pvz_id, category, score, correct_answers, total_questions, created_at
+        FROM results WHERE user_id = ? ORDER BY id DESC""",
+        (user_id,),
+    )
 
 
 async def get_all_pvz_users():
