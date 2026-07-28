@@ -7,25 +7,9 @@ QUESTION_FILE = Path(__file__).resolve().parent.parent / "voprosi_wb.txt"
 DEFAULT_CATEGORY = "Общая работа ПВЗ"
 DEFAULT_DIFFICULTY = 1
 DEFAULT_TYPE = "Один правильный ответ"
-FULL_TEST_LIMIT = 20
-CATEGORY_TEST_LIMIT = 20
-
-CATEGORIES = [
-    "Общая работа ПВЗ",
-    "Приёмка товара",
-    "Размещение товара",
-    "Выдача заказов",
-    "Примерка",
-    "Возвраты",
-    "Брак",
-    "Клиенты",
-    "Штрафы",
-    "Программа WB",
-    "Нестандартные ситуации",
-]
-
+FULL_TEST_LIMIT = 30
+CATEGORY_TEST_LIMIT = 30
 DIFFICULTY_MAP = {"легкая": 1, "лёгкая": 1, "средняя": 2, "сложная": 3}
-
 
 @dataclass(frozen=True)
 class Question:
@@ -35,62 +19,82 @@ class Question:
     type: str
     text: str
     answers: list[str]
-    correct_indexes: list[int]
+    correct_answers: list[str]
     explanation: str
+    weight: int = 1
+
+    @property
+    def is_choice(self) -> bool:
+        return len(self.answers) >= 2
 
     @property
     def is_multiple(self) -> bool:
-        return len(self.correct_indexes) > 1 or "множе" in self.type.lower()
+        return len(self.correct_answers) > 1 or "несколько" in self.type.lower() or "множе" in self.type.lower()
+
+    @property
+    def correct_indexes(self) -> list[int]:
+        result = []
+        for ans in self.correct_answers:
+            if re.fullmatch(r"[A-ZА-Я]", ans.strip().upper()):
+                idx = ord(ans.strip().upper()[0]) - ord("A")
+                if 0 <= idx < len(self.answers):
+                    result.append(idx)
+        return result
 
 
-def _after_label(block: str, labels: tuple[str, ...], stop_labels: tuple[str, ...]) -> str:
-    pattern = rf"(?:^|\n)(?:{'|'.join(map(re.escape, labels))})\s*:?\s*\n?"
-    match = re.search(pattern, block, re.IGNORECASE)
-    if not match:
+def _inline(block: str, label: str) -> str:
+    m = re.search(rf"^\s*{re.escape(label)}\s*:\s*(.+)$", block, re.I | re.M)
+    return m.group(1).strip() if m else ""
+
+
+def _section(block: str, labels: tuple[str, ...], stops: tuple[str, ...]) -> str:
+    label_re = "|".join(map(re.escape, labels))
+    m = re.search(rf"(?:^|\n)\s*(?:{label_re})\s*:?\s*\n?", block, re.I)
+    if not m:
         return ""
-    rest = block[match.end():]
-    stop_pattern = rf"\n(?:{'|'.join(map(re.escape, stop_labels))})\s*:?\s*\n?"
-    stop = re.search(stop_pattern, rest, re.IGNORECASE)
-    return rest[:stop.start()].strip() if stop else rest.strip()
+    rest = block[m.end():]
+    if stops:
+        stop_re = "|".join(map(re.escape, stops))
+        s = re.search(rf"\n\s*(?:{stop_re})\s*:?\s*\n?", rest, re.I)
+        if s:
+            rest = rest[:s.start()]
+    return re.sub(r"\n\s*-{3,}.*", "", rest, flags=re.S).strip()
 
 
-def _extract_inline(block: str, label: str) -> str:
-    match = re.search(rf"^\s*{re.escape(label)}\s*:\s*(.+)$", block, re.MULTILINE | re.IGNORECASE)
-    return match.group(1).strip() if match else ""
-
-
-def _parse_answers(block: str) -> list[str]:
-    source = _after_label(block, ("Варианты",), ("Правильный ответ", "Правильные ответы", "Ответ", "Объяснение")) or block
-    pairs = re.findall(r"(?:^|\n)\s*([A-D])\.\s*(.+?)(?=\n\s*[A-D]\.\s|\n\s*(?:Правильный ответ|Правильные ответы|Ответ|Объяснение)\b|\Z)", source, re.S)
+def _answers(block: str) -> list[str]:
+    source = _section(block, ("Варианты",), ("Правильный ответ", "Правильные ответы", "Ответ", "Объяснение")) or block
+    pairs = re.findall(r"(?:^|\n)\s*([A-H])\.\s*(.+?)(?=\n\s*[A-H]\.\s|\n\s*(?:Правильный ответ|Правильные ответы|Ответ|Объяснение)\b|\Z)", source, re.S | re.I)
     return [re.sub(r"\s+", " ", text).strip() for _, text in pairs]
 
 
-def _parse_correct(block: str, answers: list[str]) -> list[int]:
-    raw = _after_label(block, ("Правильный ответ", "Правильные ответы", "Ответ"), ("Объяснение",))
-    raw_upper = raw.upper()
-    if "ВСЕ" in raw_upper:
-        return list(range(len(answers)))
-    letters = re.findall(r"\b([A-D])\b", raw_upper)
-    indexes = sorted({ord(letter) - ord("A") for letter in letters if ord(letter) - ord("A") < len(answers)})
-    return indexes[:1] if indexes else []
+def _correct(block: str, answers: list[str]) -> list[str]:
+    raw = _section(block, ("Правильный ответ", "Правильные ответы", "Ответ"), ("Объяснение",))
+    if not raw:
+        return []
+    letters = re.findall(r"\b([A-H])\b", raw.upper())
+    if answers and letters:
+        return sorted(set(letters), key=letters.index)
+    return [re.sub(r"\s+", " ", raw).strip()]
 
 
-def _parse_question(block: str, fallback_category: str) -> Question | None:
-    qid_match = re.search(r"\bWB-\d{4}\b", block)
-    if not qid_match:
+def _parse(block: str, fallback_category: str) -> Question | None:
+    mid = re.search(r"\bWB-\d{4}\b", block)
+    if not mid:
         return None
-    qid = qid_match.group(0)
-    category = _extract_inline(block, "Категория") or fallback_category or DEFAULT_CATEGORY
-    difficulty_raw = (_extract_inline(block, "Сложность") or "").lower()
-    difficulty = DIFFICULTY_MAP.get(difficulty_raw, DEFAULT_DIFFICULTY)
-    qtype = _extract_inline(block, "Тип") or DEFAULT_TYPE
-    text = _after_label(block, ("Вопрос",), ("Варианты", "Правильный ответ", "Правильные ответы", "Ответ", "Объяснение"))
-    answers = _parse_answers(block)
-    correct_indexes = _parse_correct(block, answers)
-    explanation = _after_label(block, ("Объяснение",), tuple()) or "Разберите этот вопрос с наставником, чтобы закрепить правильный порядок действий."
-    if not text or len(answers) < 2 or not correct_indexes:
+    category = _inline(block, "Категория") or fallback_category or DEFAULT_CATEGORY
+    difficulty = DIFFICULTY_MAP.get((_inline(block, "Сложность") or "").lower(), DEFAULT_DIFFICULTY)
+    qtype = _inline(block, "Тип") or DEFAULT_TYPE
+    text = _section(block, ("Вопрос",), ("Варианты", "Правильный ответ", "Правильные ответы", "Ответ", "Объяснение"))
+    # If no explicit Варианты marker, remove option/correct sections from question text.
+    text = re.sub(r"\n\s*[A-H]\.\s.*", "", text, flags=re.S).strip()
+    answers = _answers(block)
+    correct = _correct(block, answers)
+    explanation = _section(block, ("Объяснение",), tuple()) or "Объяснение не указано."
+    if not text or not correct:
         return None
-    return Question(qid, category, difficulty, qtype, re.sub(r"\s+", " ", text).strip(), answers, correct_indexes, re.sub(r"\s+", " ", explanation).strip())
+    if answers and not Question("", category, difficulty, qtype, text, answers, correct, explanation).correct_indexes:
+        return None
+    return Question(mid.group(0), category, difficulty, qtype, re.sub(r"\s+", " ", text).strip(), answers, correct, re.sub(r"\s+", " ", explanation).strip())
 
 
 def load_questions() -> list[Question]:
@@ -98,24 +102,20 @@ def load_questions() -> list[Question]:
         return []
     content = QUESTION_FILE.read_text(encoding="utf-8")
     starts = [m.start() for m in re.finditer(r"(?m)^WB-\d{4}\s*$", content)]
-    questions: list[Question] = []
-    category = DEFAULT_CATEGORY
+    questions, category = [], DEFAULT_CATEGORY
     for i, start in enumerate(starts):
-        block = content[start: starts[i + 1] if i + 1 < len(starts) else len(content)]
-        parsed = _parse_question(block, category)
-        if parsed:
-            category = parsed.category
-            questions.append(parsed)
+        q = _parse(content[start: starts[i + 1] if i + 1 < len(starts) else len(content)], category)
+        if q:
+            category = q.category
+            questions.append(q)
     return questions
 
 
 def get_categories() -> list[str]:
-    available = {question.category for question in load_questions()}
-    return [category for category in CATEGORIES if category in available] + sorted(available - set(CATEGORIES))
+    return sorted({q.category for q in load_questions()})
 
 
-def build_test(category: str | None = None) -> list[Question]:
+def build_test(category: str | None = None, limit: int = FULL_TEST_LIMIT) -> list[Question]:
     questions = [q for q in load_questions() if category is None or q.category == category]
     random.shuffle(questions)
-    limit = CATEGORY_TEST_LIMIT if category else FULL_TEST_LIMIT
     return questions[:limit]

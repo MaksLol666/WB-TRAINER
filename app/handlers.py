@@ -1,1962 +1,240 @@
-import random
-
-import aiosqlite
-from aiogram import F, Router
+import logging, random, time
+from html import escape
+from aiogram import F, Router, Bot
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-
-from app.config import DATABASE
 from app.constants import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPER_ADMIN
 from app.database import *
 from app.keyboards import *
-from app.questions_bank import build_test, get_categories as get_bank_categories
-from app.states import CreatePVZState, DeleteState, RegisterState, TestState
+from app.questions_bank import Question, build_test, get_categories, load_questions
+from app.states import AssignOwnerState, BroadcastState, CreatePVZState, DeleteState, RegisterState, RemoveOwnerState, TestState
 
-router = Router()
+router = Router(); log = logging.getLogger(__name__)
+ROLE_LABELS={ROLE_SUPER_ADMIN:"Главный администратор",ROLE_ADMIN:"👨‍💼 Менеджер ПВЗ",ROLE_EMPLOYEE:"Сотрудник"}
 
+def display_user(u): return f"@{u[2]}" if u[2] else escape(u[3])
+def menu(role): return super_admin_menu() if role==ROLE_SUPER_ADMIN else admin_menu() if role==ROLE_ADMIN else employee_menu()
+def level(avg:int, tests:int): return "Эксперт ПВЗ" if tests>=20 and avg>=90 else "Опытный менеджер" if tests>=5 and avg>=80 else "Сотрудник" if tests else "Новичок"
+def achievements(results):
+    tests=len(results); perfect=any(r[4]==100 for r in results); success=sum(1 for r in results if r[4]>=70)
+    icons=[]
+    if tests>=1: icons.append("🥉")
+    if success>=5: icons.append("🥈")
+    if success>=20: icons.append("🥇")
+    if len(results[:5])==5 and all(r[4]>=70 for r in results[:5]): icons.append("🔥")
+    if perfect: icons.append("💯")
+    if len({r[7][:10] for r in results})>=3: icons.append("📚")
+    return " ".join(icons) or "—"
 
 @router.message(CommandStart())
-async def start_command(
-        message: Message,
-        state: FSMContext
-):
-
-    telegram_id = message.from_user.id
-
-    full_name = message.from_user.full_name
-
-    username = message.from_user.username
-
-
-    # создаём супер админа при первом входе
-
-    await ensure_super_admin_exists(
-        telegram_id,
-        full_name,
-        username
-    )
-
-
-    user = await get_user(
-        telegram_id
-    )
-
-
-
+async def start_command(message: Message, state: FSMContext):
+    await ensure_super_admin_exists(message.from_user.id, message.from_user.full_name, message.from_user.username)
+    user=await get_user(message.from_user.id)
     if user:
-
-
-        role = user[4]
-
-
-
-        if role == ROLE_SUPER_ADMIN:
-
-
-            await message.answer(
-                "👑 <b>WB TRAINER</b>\n\n"
-                "Вы вошли как главный администратор.",
-                reply_markup=super_admin_menu()
-            )
-
-
-        elif role == ROLE_ADMIN:
-
-
-            await message.answer(
-                "🏢 <b>WB TRAINER</b>\n\n"
-                "Вы вошли как владелец ПВЗ.",
-                reply_markup=admin_menu()
-            )
-
-
-        elif role == ROLE_EMPLOYEE:
-
-
-            await message.answer(
-                "🎓 <b>WB TRAINER</b>\n\n"
-                "Добро пожаловать!\n"
-                "Выберите действие:",
-                reply_markup=employee_menu()
-            )
-
-
-        return
-
-
-
-
-    await message.answer(
-        "🎓 <b>WB TRAINER</b>\n\n"
-        "Вы ещё не зарегистрированы.\n\n"
-        "Введите код вашего ПВЗ:",
-        reply_markup=registration_menu()
-    )
-
-
-    await state.set_state(
-        RegisterState.waiting_invite_code
-    )
-
-
-
-
-
-# ============================================================
-# EMPLOYEE REGISTRATION
-# ============================================================
-
-
-@router.message(
-    RegisterState.waiting_invite_code
-)
-async def register_by_code(
-        message: Message,
-        state: FSMContext
-):
-
-    code = message.text.strip().upper()
-
-
-
-    pvz = await get_pvz_by_code(
-        code
-    )
-
-
-
-    if not pvz:
-
-
-        await message.answer(
-            "❌ Такой код ПВЗ не найден."
-        )
-
-        return
-
-
-
-
-    telegram_id = message.from_user.id
-
-    full_name = message.from_user.full_name
-
-    username = message.from_user.username
-
-
-
-    await add_user(
-        telegram_id,
-        full_name,
-        username,
-        ROLE_EMPLOYEE,
-        pvz[0]
-    )
-
-
-
-    await state.clear()
-
-
-
-    await message.answer(
-        "✅ Регистрация успешно завершена!\n\n"
-        f"📍 ПВЗ: <b>{pvz[1]}</b>\n\n"
-        "Теперь вы можете проходить обучение.",
-        reply_markup=employee_menu()
-    )
-
-
-# ============================================================
-# CREATE PVZ
-# ============================================================
-
-
-@router.message(
-    F.text == "➕ Создать ПВЗ"
-)
-async def create_pvz_start(
-        message: Message,
-        state: FSMContext
-):
-
-
-    if not is_super_admin(
-        message.from_user.id
-    ):
-
-
-        await message.answer(
-            "❌ Создавать ПВЗ может только главный администратор."
-        )
-
-        return
-
-
-
-    await message.answer(
-        "🏢 Введите название нового ПВЗ:"
-    )
-
-
-
-    await state.set_state(
-        CreatePVZState.waiting_name
-    )
-
-
-
-
-
-@router.message(
-    CreatePVZState.waiting_name
-)
-async def create_pvz_finish(
-        message: Message,
-        state: FSMContext
-):
-
-
-    if not is_super_admin(
-        message.from_user.id
-    ):
-
-
-        await state.clear()
-
-        await message.answer(
-            "❌ Нет доступа."
-        )
-
-        return
-
-
-
-    name = message.text.strip()
-
-
-
-    if len(name) < 2:
-
-
-        await message.answer(
-            "❌ Название слишком короткое."
-        )
-
-        return
-
-
-
-
-    pvz_id, code = await create_pvz(
-        name,
-        message.from_user.id
-    )
-
-
-
-    await state.clear()
-
-
-
-    await message.answer(
-        "✅ <b>ПВЗ создан!</b>\n\n"
-        f"📍 Название:\n"
-        f"<b>{name}</b>\n\n"
-        f"🆔 ID ПВЗ: <code>{pvz_id}</code>\n\n"
-        f"🔑 Код сотрудников:\n"
-        f"<code>{code}</code>\n\n"
-        "Передайте этот код сотрудникам для регистрации.",
-        reply_markup=super_admin_menu()
-    )
-
-
-# ============================================================
-# MY PVZ
-# ============================================================
-
-
-@router.message(
-    F.text == "🏢 Все ПВЗ"
-)
-@router.message(
-    F.text == "🏢 Мои ПВЗ"
-)
-async def my_pvz(
-        message: Message
-):
-
-
-    user_id = message.from_user.id
-
-
-    user = await get_user(
-        user_id
-    )
-
-
-    if not user:
-
-
-        await message.answer(
-            "❌ Пользователь не найден."
-        )
-
-        return
-
-
-
-    role = user[4]
-
-
-
-    # =========================
-    # ВЛАДЕЛЕЦ ПВЗ
-    # =========================
-
-    if role == ROLE_ADMIN:
-
-
-        pvzs = await get_admin_pvz(
-            user_id
-        )
-
-
-        if not pvzs:
-
-
-            await message.answer(
-                "🏢 У вас пока нет ПВЗ."
-            )
-
-            return
-
-
-
-        text = (
-            "🏢 <b>Ваши ПВЗ:</b>\n\n"
-        )
-
-
-        for pvz in pvzs:
-
-
-            employees = await get_pvz_employees_only(
-                pvz[0]
-            )
-
-
-            text += (
-                f"📍 <b>{pvz[1]}</b>\n"
-                f"🔑 Код сотрудников: "
-                f"<code>{pvz[2]}</code>\n"
-                f"👥 Сотрудников: {len(employees)}\n\n"
-            )
-
-
-
-        await message.answer(
-            text,
-            reply_markup=admin_menu()
-        )
-
-        return
-
-
-
-
-
-    # =========================
-    # SUPER ADMIN
-    # =========================
-
-
-    if role == ROLE_SUPER_ADMIN:
-
-
-        async with aiosqlite.connect(DATABASE) as db:
-
-
-            cursor = await db.execute(
-                """
-                SELECT *
-
-                FROM pvz
-
-                ORDER BY id
-                """
-            )
-
-
-            pvzs = await cursor.fetchall()
-
-
-
-        if not pvzs:
-
-
-            await message.answer(
-                "🏢 ПВЗ пока нет."
-            )
-
-            return
-
-
-
-        text = (
-            "👑 <b>Все ПВЗ системы:</b>\n\n"
-        )
-
-
-        for pvz in pvzs:
-
-
-            owner = "нет"
-
-
-            if pvz[3]:
-
-
-                owner_user = await get_user(
-                    pvz[3]
-                )
-
-
-                if owner_user:
-
-                    if owner_user[3]:
-
-                        owner = "@" + owner_user[3]
-
-                    else:
-
-                        owner = owner_user[2]
-
-
-
-            employees = await get_pvz_employees_only(
-                pvz[0]
-            )
-
-
-            text += (
-                f"📍 <b>{pvz[1]}</b>\n"
-                f"🆔 ID: <code>{pvz[0]}</code>\n"
-                f"👤 Владелец: {owner}\n"
-                f"👥 Сотрудников: {len(employees)}\n\n"
-            )
-
-
-
-        await message.answer(
-            text,
-            reply_markup=super_admin_menu()
-        )
-
-        return
-
-
-
-
-    await message.answer(
-        "❌ Нет доступа."
-        )
-
-
-# ============================================================
-# EMPLOYEES LIST
-# ============================================================
-
-
-async def get_pvz_employees_only(
-        pvz_id: int
-):
-
-    async with aiosqlite.connect(DATABASE) as db:
-
-        cursor = await db.execute(
-            """
-            SELECT *
-
-            FROM users
-
-            WHERE pvz_id = ?
-
-            AND role = ?
-
-            ORDER BY id
-            """,
-            (
-                pvz_id,
-                ROLE_EMPLOYEE
-            )
-        )
-
-        return await cursor.fetchall()
-
-
-
-
-
-async def get_all_pvz_users():
-
-    async with aiosqlite.connect(DATABASE) as db:
-
-        cursor = await db.execute(
-            """
-            SELECT *
-
-            FROM users
-
-            WHERE role != ?
-
-            ORDER BY pvz_id, id
-            """,
-            (
-                ROLE_SUPER_ADMIN,
-            )
-        )
-
-        return await cursor.fetchall()
-
-
-
-
-
-@router.message(
-    F.text == "👤 Все сотрудники"
-)
-@router.message(
-    F.text == "👥 Сотрудники"
-)
-async def employees_list(
-        message: Message
-):
-
-
-    user = await get_user(
-        message.from_user.id
-    )
-
-
-    if not user:
-
-
-        await message.answer(
-            "❌ Пользователь не найден."
-        )
-
-        return
-
-
-
-    role = user[4]
-
-
-
-    # ==================================
-    # ВЛАДЕЛЕЦ ПВЗ
-    # ==================================
-
-    if role == ROLE_ADMIN:
-
-
-        pvzs = await get_admin_pvz(
-            message.from_user.id
-        )
-
-
-        if not pvzs:
-
-
-            await message.answer(
-                "🏢 У вас нет ПВЗ."
-            )
-
-            return
-
-
-
-        text = (
-            "👥 <b>Сотрудники ваших ПВЗ:</b>\n\n"
-        )
-
-
-        for pvz in pvzs:
-
-
-            employees = await get_pvz_employees_only(
-                pvz[0]
-            )
-
-
-            text += (
-                f"📍 <b>{pvz[1]}</b>\n\n"
-            )
-
-
-            if not employees:
-
-
-                text += (
-                    "Сотрудников нет\n\n"
-                )
-
-                continue
-
-
-
-            for employee in employees:
-
-
-                username = employee[3]
-
-
-                if username:
-
-                    name = "@" + username
-
-                else:
-
-                    name = employee[2]
-
-
-
-                text += (
-                    f"👤 {name}\n"
-                    f"ID: <code>{employee[1]}</code>\n"
-                    f"Дата: {employee[6][:10]}\n\n"
-                )
-
-
-
-        await message.answer(
-            text,
-            reply_markup=admin_menu()
-        )
-
-        return
-
-
-
-
-
-    # ==================================
-    # SUPER ADMIN
-    # ==================================
-
-    if role == ROLE_SUPER_ADMIN:
-
-
-        users = await get_all_pvz_users()
-
-
-
-        if not users:
-
-
-            await message.answer(
-                "👥 Пользователей пока нет."
-            )
-
-            return
-
-
-
-        text = (
-            "👑 <b>Все пользователи системы:</b>\n\n"
-        )
-
-
-
-        current_pvz = None
-
-
-
-        for employee in users:
-
-
-            pvz_id = employee[5]
-
-
-            if pvz_id != current_pvz:
-
-
-                current_pvz = pvz_id
-
-
-                pvz = await get_pvz_by_id(
-                    pvz_id
-                )
-
-
-                if pvz:
-
-
-                    text += (
-                        f"📍 <b>{pvz[1]}</b>\n"
-                    )
-
-
-
-            username = employee[3]
-
-
-            if username:
-
-                name = "@" + username
-
-            else:
-
-                name = employee[2]
-
-
-
-            text += (
-                f"👤 {name}\n"
-                f"Роль: {employee[4]}\n"
-                f"ID: <code>{employee[1]}</code>\n\n"
-            )
-
-
-
-        await message.answer(
-            text,
-            reply_markup=super_admin_menu()
-        )
-
-        return
-
-
-
-
-
-    await message.answer(
-        "❌ Нет доступа."
-    )
-
-
-# ============================================================
-# STATISTICS
-# ============================================================
-
-
-async def get_system_statistics():
-
-    async with aiosqlite.connect(DATABASE) as db:
-
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM pvz"
-        )
-        pvz_count = (await cursor.fetchone())[0]
-
-        cursor = await db.execute(
-            """
-            SELECT COUNT(*)
-
-            FROM users
-
-            WHERE role = ?
-            """,
-            (
-                ROLE_ADMIN,
-            )
-        )
-        owners_count = (await cursor.fetchone())[0]
-
-        cursor = await db.execute(
-            """
-            SELECT COUNT(*)
-
-            FROM users
-
-            WHERE role = ?
-            """,
-            (
-                ROLE_EMPLOYEE,
-            )
-        )
-        employees_count = (await cursor.fetchone())[0]
-
-        cursor = await db.execute(
-            """
-            SELECT COUNT(*)
-
-            FROM results
-            """
-        )
-        tests_count = (await cursor.fetchone())[0]
-
-        return (
-            pvz_count,
-            owners_count,
-            employees_count,
-            tests_count
-        )
-
-
-
-
-@router.message(
-    F.text == "📊 Общая статистика"
-)
-async def system_statistics(
-        message: Message
-):
-
-    user = await get_user(
-        message.from_user.id
-    )
-
-    if not user:
-
-        return
-
-    if user[4] != ROLE_SUPER_ADMIN:
-
-        await message.answer(
-            "❌ Нет доступа."
-        )
-
-        return
-
-
-    pvz_count, owners_count, employees_count, tests_count = await get_system_statistics()
-
-
-    text = (
-        "📊 <b>Статистика WB TRAINER</b>\n\n"
-
-        f"🏢 Всего ПВЗ: <b>{pvz_count}</b>\n"
-        f"👑 Владельцев ПВЗ: <b>{owners_count}</b>\n"
-        f"👥 Сотрудников: <b>{employees_count}</b>\n"
-        f"📝 Пройдено тестов: <b>{tests_count}</b>\n\n"
-
-        f"👥 Всего пользователей: "
-        f"<b>{owners_count + employees_count + 1}</b>"
-    )
-
-
-    await message.answer(
-        text,
-        reply_markup=super_admin_menu()
-    )
-
-
-
-
-@router.message(
-    F.text == "📊 Статистика ПВЗ"
-)
-async def owner_statistics(
-        message: Message
-):
-
-    user = await get_user(
-        message.from_user.id
-    )
-
-    if not user:
-
-        return
-
-    if user[4] != ROLE_ADMIN:
-
-        await message.answer(
-            "❌ Нет доступа."
-        )
-
-        return
-
-
-    pvzs = await get_admin_pvz(
-        message.from_user.id
-    )
-
-    if not pvzs:
-
-        await message.answer(
-            "У вас нет ПВЗ."
-        )
-
-        return
-
-
-    text = "📊 <b>Статистика ваших ПВЗ</b>\n\n"
-
-
-    for pvz in pvzs:
-
-        employees = await get_pvz_employees_only(
-            pvz[0]
-        )
-
-        text += (
-            f"🏢 <b>{pvz[1]}</b>\n"
-            f"👥 Сотрудников: {len(employees)}\n"
-            f"🔑 Код: <code>{pvz[2]}</code>\n\n"
-        )
-
-
-    await message.answer(
-        text,
-        reply_markup=admin_menu()
-    )
-
-
-
-
-
-# ============================================================
-# PROFILE
-# ============================================================
-
-
-
-@router.message(
-    F.text == "👤 Профиль"
-)
-async def profile(
-        message: Message
-):
-
-
-    user = await get_user(
-        message.from_user.id
-    )
-
-
-    if not user:
-
-
-        await message.answer(
-            "❌ Профиль не найден."
-        )
-
-        return
-
-
-
-
-    username = user[3]
-
-
-
-    if username:
-
-        username = "@" + username
-
+        await state.clear(); await message.answer("🎓 <b>WB TRAINER v1.1</b>\n\nВыберите действие:", reply_markup=menu(user[4])); return
+    await message.answer("🎓 <b>WB TRAINER</b>\n\nВведите код вашего ПВЗ:", reply_markup=registration_menu()); await state.set_state(RegisterState.waiting_invite_code)
+
+@router.message(RegisterState.waiting_invite_code)
+async def register_by_code(message: Message, state: FSMContext, bot: Bot):
+    code=(message.text or "").strip().upper(); pvz=await get_pvz_by_code(code)
+    if not pvz: await message.answer("❌ Такой код ПВЗ не найден."); return
+    await add_user(message.from_user.id, message.from_user.full_name, message.from_user.username, ROLE_EMPLOYEE, pvz[0]); await state.clear()
+    if pvz[3]:
+        try: await bot.send_message(pvz[3], f"👤 Новый сотрудник зарегистрирован в {escape(pvz[1])}: {escape(message.from_user.full_name)}")
+        except Exception: log.exception("admin notification failed")
+    await message.answer(f"✅ Регистрация завершена!\n\n📍 ПВЗ: <b>{escape(pvz[1])}</b>", reply_markup=employee_menu())
+
+@router.message(F.text == "➕ Создать ПВЗ")
+async def create_pvz_start(message: Message, state: FSMContext):
+    if not is_super_admin(message.from_user.id): await message.answer("❌ Нет доступа."); return
+    await message.answer("🏢 Введите название нового ПВЗ:"); await state.set_state(CreatePVZState.waiting_name)
+@router.message(CreatePVZState.waiting_name)
+async def create_pvz_finish(message: Message, state: FSMContext):
+    name=(message.text or "").strip()
+    if len(name)<2: await message.answer("❌ Название слишком короткое."); return
+    pvz_id, code=await create_pvz(name, message.from_user.id); await state.clear()
+    await message.answer(f"✅ <b>ПВЗ создан!</b>\n\n📍 <b>{escape(name)}</b>\n🆔 ID: <code>{pvz_id}</code>\n🔑 Код: <code>{code}</code>", reply_markup=super_admin_menu())
+
+@router.message(F.text.in_({"🏢 Все ПВЗ","🏢 Мой ПВЗ","🏢 Мои ПВЗ"}))
+async def pvz_profile(message: Message):
+    user=await get_user(message.from_user.id); role=user[4] if user else None
+    pvzs=await get_all_pvz() if role==ROLE_SUPER_ADMIN else await get_admin_pvz(message.from_user.id) if role==ROLE_ADMIN else []
+    if not pvzs: await message.answer("🏢 ПВЗ не найдены."); return
+    text="🏢 <b>МОЙ ПВЗ</b>\n\n" if role==ROLE_ADMIN else "👑 <b>Все ПВЗ</b>\n\n"
+    for p in pvzs:
+        employees=await get_pvz_employees_only(p[0]); res=await get_pvz_results(p[0]); avg=round(sum(r[5] for r in res)/len(res)) if res else 0
+        text+=f"Название:\n<b>{escape(p[1])}</b>\n\n👥 Сотрудников: {len(employees)}\n📊 Средний результат: {avg}%\n📝 Всего тестов: {len(res)}\n🔑 Код: <code>{p[2]}</code>\n\n"
+    await message.answer(text, reply_markup=menu(role))
+
+@router.message(F.text.in_({"👤 Профиль"}))
+async def profile(message: Message):
+    user=await get_user(message.from_user.id)
+    if not user: await message.answer("❌ Профиль не найден."); return
+    res=await get_user_results(user[0]); avg=round(sum(r[4] for r in res)/len(res)) if res else 0; pvz=await get_pvz_by_id(user[5]); uname=f"@{user[2]}" if user[2] else escape(user[3])
+    await message.answer(f"👤 <b>МОЙ ПРОФИЛЬ</b>\n━━━━━━━━━━━━\n{uname}\n\nРоль:\n{ROLE_LABELS[user[4]]}\n\nПункт:\n📍 {escape(pvz[1]) if pvz else 'Не назначен'}\n\nДата регистрации:\n📅 {user[6][:10]}\n━━━━━━━━━━━━\n\n📊 <b>Статистика:</b>\n\nПройдено тестов:\n{len(res)}\n\nСредний результат:\n{avg}%\n\nУровень:\n{level(avg,len(res))}\n\nДостижения:\n{achievements(res)}", reply_markup=menu(user[4]))
+
+@router.message(F.text.in_({"👥 Сотрудники","👤 Все сотрудники"}))
+async def employees(message: Message):
+    user=await get_user(message.from_user.id); role=user[4] if user else None
+    pvzs=await get_all_pvz() if role==ROLE_SUPER_ADMIN else await get_admin_pvz(message.from_user.id) if role==ROLE_ADMIN else []
+    if not pvzs: await message.answer("❌ Нет доступа или ПВЗ."); return
+    text="👥 <b>Сотрудники ПВЗ</b>\n\n"
+    for p in pvzs:
+        text+=f"📍 <b>{escape(p[1])}</b>\n\n"
+        for e in await get_pvz_employees_only(p[0]): text+=f"👤 {display_user(e)}\nРоль:\nСотрудник\nID:\n<code>{e[1]}</code>\nДата регистрации:\n{e[6][:10]}\n\n"
+    await message.answer(text or "Сотрудников нет", reply_markup=menu(role))
+
+@router.message(F.text.in_({"📊 Статистика","📊 Общая статистика","📊 Статистика ПВЗ"}))
+async def stats(message: Message):
+    user=await get_user(message.from_user.id)
+    if not user: return
+    if user[4]==ROLE_EMPLOYEE:
+        res=await get_user_results(user[0]); avg=round(sum(r[4] for r in res)/len(res)) if res else 0; await message.answer(f"📊 <b>Моя статистика</b>\n\nТестов: {len(res)}\nСредний результат: {avg}%\nЛучший: {max([r[4] for r in res], default=0)}%", reply_markup=employee_menu()); return
+    if user[4]==ROLE_SUPER_ADMIN:
+        p,a,e,t=await get_system_statistics(); await message.answer(f"📊 <b>Статистика WB TRAINER</b>\n\n🏢 ПВЗ: {p}\n👨‍💼 Админов: {a}\n👥 Сотрудников: {e}\n📝 Тестов: {t}", reply_markup=super_admin_menu()); return
+    await pvz_profile(message)
+
+@router.message(F.text.in_({"📝 Тесты","📚 Обучение","📚 Начать тест"}))
+async def test_menu(message: Message, state: FSMContext):
+    user=await get_user(message.from_user.id)
+    if not user or user[4]!=ROLE_EMPLOYEE: await message.answer("❌ Тестирование доступно сотрудникам."); return
+    await state.clear(); await message.answer("📝 <b>Тест WB TRAINER</b>\n\nОдин тест содержит до 30 вопросов.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎯 Полный тест", callback_data="test:full")]]+[[InlineKeyboardButton(text=c, callback_data=f"test:cat:{i}")] for i,c in enumerate(get_categories())]))
+
+def answer_k(qi, q, selected=None):
+    if not q["answers"]: return None
+    rows=[[InlineKeyboardButton(text=("☑ " if selected and i in selected else "")+f"{chr(65+i)}) {a[:45]}", callback_data=f"test:ans:{qi}:{i}")] for i,a in enumerate(q["answers"])]
+    if q["multiple"]: rows.append([InlineKeyboardButton(text="✅ Проверить ответ", callback_data="test:check")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+async def show_question(msg, state):
+    d=await state.get_data(); q=d["questions"][d["current"]]; await state.update_data(answered=False, selected=[])
+    text=f"📝 <b>Тест WB TRAINER</b>\n\nВопрос {d['current']+1}/{len(d['questions'])}\n\n{escape(q['text'])}"
+    if not q["answers"]: text+="\n\nВведите ответ:"
+    sent=await msg.answer(text, reply_markup=answer_k(d['current'], q)); await state.update_data(message_id=sent.message_id)
+def payload(q:Question):
+    order=list(range(len(q.answers))); random.shuffle(order); answers=[q.answers[i] for i in order]
+    correct=[order.index(i) for i in q.correct_indexes if i in order] if q.answers else q.correct_answers
+    return {"text":q.text,"answers":answers,"correct":correct,"explanation":q.explanation,"multiple":q.is_multiple}
+@router.callback_query(F.data.startswith("test:"))
+async def test_callbacks(cb: CallbackQuery, state: FSMContext):
+    data=cb.data
+    if data in {"test:full"} or data.startswith("test:cat:"):
+        cats=get_categories(); cat=None if data=="test:full" else cats[int(data.split(':')[-1])]; qs=[payload(q) for q in build_test(cat,30)]
+        await state.set_state(TestState.answering); await state.update_data(category=cat or "Полный тест", questions=qs, current=0, correct_count=0, started_at=time.time(), mistakes=[])
+        await cb.message.delete(); await show_question(cb.message, state); await cb.answer(); return
+    d=await state.get_data(); q=d["questions"][d["current"]]
+    if data.startswith("test:ans:"):
+        idx=int(data.split(':')[-1])
+        if q["multiple"]:
+            sel=set(d.get("selected",[])); sel.symmetric_difference_update({idx}); await state.update_data(selected=list(sel)); await cb.message.edit_reply_markup(reply_markup=answer_k(d['current'],q,sel)); await cb.answer(); return
+        await finish_answer(cb,state,{idx}); return
+    if data=="test:check": await finish_answer(cb,state,set(d.get("selected",[]))); return
+    if data=="test:next":
+        try: await cb.message.delete()
+        except Exception: pass
+        ni=d["current"]+1
+        if ni>=len(d["questions"]): await finish_test(cb,state); return
+        await state.update_data(current=ni); await show_question(cb.message,state); await cb.answer()
+async def finish_answer(cb,state,selected):
+    d=await state.get_data(); q=d["questions"][d["current"]]; ok=selected==set(q["correct"]); cc=d["correct_count"]+(1 if ok else 0); mistakes=d.get("mistakes",[])
+    if not ok: mistakes.append({"question":q["text"],"correct":q["correct"]})
+    await state.update_data(answered=True, correct_count=cc, mistakes=mistakes)
+    correct=", ".join(f"{chr(65+i)}) {q['answers'][i]}" for i in q["correct"]) if q["answers"] else ", ".join(q["correct"])
+    await cb.message.edit_text(("✅ Правильно" if ok else "❌ Ошибка")+f"\n\nПравильный ответ: <b>{escape(correct)}</b>\n\nОбъяснение:\n{escape(q['explanation'])}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➡️ Далее", callback_data="test:next")]])); await cb.answer()
+@router.message(TestState.answering)
+async def text_answer(message:Message,state:FSMContext):
+    d=await state.get_data(); q=d["questions"][d["current"]]
+    if q["answers"]: return
+    ok=(message.text or '').strip().casefold() in [a.casefold() for a in q['correct']]; await finish_text(message,state,ok)
+async def finish_text(message,state,ok):
+    d=await state.get_data(); q=d['questions'][d['current']]; await state.update_data(answered=True, correct_count=d['correct_count']+(1 if ok else 0))
+    await message.answer(("✅ Правильно" if ok else "❌ Ошибка")+f"\n\nПравильный ответ: <b>{escape(', '.join(q['correct']))}</b>\n\nОбъяснение:\n{escape(q['explanation'])}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➡️ Далее", callback_data="test:next")]]))
+async def finish_test(cb,state):
+    d=await state.get_data(); user=await get_user(cb.from_user.id); total=len(d['questions']); correct=d['correct_count']; pct=round(correct/total*100) if total else 0
+    await save_result(user[0],pct,correct,total,d['category'],user[5],int(time.time()-d.get('started_at',time.time())),d.get('mistakes',[])); await state.clear()
+    await cb.message.answer(f"🎓 <b>Тест завершён</b>\n\nРезультат:\n{correct}/{total}\n\n{pct}%\n\n"+("✅ Пройден" if pct>=70 else "❌ Не пройден"), reply_markup=employee_menu()); await cb.answer()
+
+@router.message(F.text == "📢 Рассылка")
+async def broadcast_start(message:Message,state:FSMContext):
+    user=await get_user(message.from_user.id)
+    if not user or user[4]==ROLE_EMPLOYEE: await message.answer("❌ Нет доступа."); return
+    await state.set_state(BroadcastState.waiting_content); await message.answer("📢 Рассылка\n\nОтправьте текст, фото, видео или документ для рассылки.")
+@router.message(BroadcastState.waiting_content)
+async def broadcast_confirm(message:Message,state:FSMContext):
+    user=await get_user(message.from_user.id); recipients=[]
+    if user[4]==ROLE_SUPER_ADMIN: recipients=[u for u in await get_all_users() if u[1]!=message.from_user.id]
     else:
-
-        username = "нет"
-
-
-
-
-    pvz_text = "Нет ПВЗ"
-
-
-
-    if user[5]:
-
-
-        pvz = await get_pvz_by_id(
-            user[5]
-        )
-
-
-        if pvz:
-
-            pvz_text = pvz[1]
-
-
-
-
-    await message.answer(
-        "👤 <b>Профиль</b>\n\n"
-        f"Имя: {user[2]}\n"
-        f"Username: {username}\n"
-        f"Роль: {user[4]}\n"
-        f"ПВЗ: {pvz_text}\n"
-        f"ID: <code>{user[1]}</code>"
-    )
-
-
-
-
-
-
-@router.message(
-    F.text == "🔑 Код приглашения"
-)
-async def invite_code(
-        message: Message
-):
-    user = await get_user(message.from_user.id)
-
-    if not user or user[4] != ROLE_ADMIN:
-        await message.answer("❌ Нет доступа.")
-        return
-
-    pvzs = await get_admin_pvz(message.from_user.id)
-
-    if not pvzs:
-        await message.answer("🏢 У вас нет ПВЗ.")
-        return
-
-    text = "🔑 <b>Коды приглашения ваших ПВЗ</b>\n\n"
-
-    for pvz in pvzs:
-        text += f"📍 <b>{pvz[1]}</b> — <code>{pvz[2]}</code>\n"
-
-    await message.answer(text, reply_markup=admin_menu())
-
-
-@router.message(
-    F.text == "📊 Мои результаты"
-)
-async def my_results(
-        message: Message
-):
-    user = await get_user(message.from_user.id)
-
-    if not user:
-        await message.answer("❌ Профиль не найден.")
-        return
-
-    results = await get_user_results(user[0])
-
-    if not results:
-        await message.answer("📊 У вас пока нет результатов тестов.")
-        return
-
-    text = "📊 <b>Мои результаты</b>\n\nПоследние тесты:\n\n"
-
-    for result in results[:10]:
-        category = result[3] or "Полный тест"
-        score = result[4]
-        correct = result[5]
-        total = result[6]
-        created_at = result[7]
-        text += (
-            f"Дата: {created_at[:10]}\n"
-            f"Категория: <b>{category}</b>\n"
-            f"Результат: {correct}/{total}\n"
-            f"Процент: <b>{score}%</b>\n\n"
-        )
-
-    await message.answer(text, reply_markup=employee_menu())
-
-
-@router.message(
-    F.text == "📝 Управление тестами"
-)
-async def tests_management(
-        message: Message
-):
-    user = await get_user(message.from_user.id)
-
-    if not user or user[4] != ROLE_SUPER_ADMIN:
-        await message.answer("❌ Нет доступа.")
-        return
-
-    questions_count = await get_questions_count()
-    categories = await get_categories()
-    categories_text = ", ".join(categories) if categories else "категории ещё не добавлены"
-
-    await message.answer(
-        "📝 <b>Управление тестами</b>\n\n"
-        f"Всего вопросов: <b>{questions_count}</b>\n"
-        f"Категории: {categories_text}",
-        reply_markup=super_admin_menu(),
-    )
-
-
-# ============================================================
-# TEMP TEST SYSTEM
-# ============================================================
-
-
-def test_mode_keyboard():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Обучение по категории", callback_data="test:mode:category")],
-            [InlineKeyboardButton(text="🎯 Полный тест", callback_data="test:mode:full")],
-        ]
-    )
-
-
-def categories_keyboard():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=category, callback_data=f"test:category:{index}")]
-            for index, category in enumerate(get_bank_categories())
-        ]
-    )
-
-
-def answer_keyboard(question_index: int, answers: list[str], selected: set[int] | None = None, is_multiple: bool = False):
-    selected = selected or set()
-    keyboard = []
-    for index, answer in enumerate(answers):
-        prefix = "☑ " if index in selected else ""
-        keyboard.append([InlineKeyboardButton(text=f"{prefix}{chr(65 + index)}) {answer}", callback_data=f"test:answer:{question_index}:{index}")])
-    if is_multiple:
-        keyboard.append([InlineKeyboardButton(text="✅ Проверить ответ", callback_data=f"test:check:{question_index}")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def next_question_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➡ Следующий вопрос", callback_data="test:next")]])
-
-
-def _question_payload(question):
-    order = list(range(len(question.answers)))
-    random.shuffle(order)
-    correct = [order.index(index) for index in question.correct_indexes if index in order]
-    return {
-        "id": question.id,
-        "category": question.category,
-        "type": question.type,
-        "text": question.text,
-        "answers": [question.answers[index] for index in order],
-        "correct": correct,
-        "explanation": question.explanation,
-        "is_multiple": question.is_multiple,
-    }
-
-
-def _score_text(percent: int) -> str:
-    if percent >= 90:
-        return "🔥 Отличное знание работы ПВЗ"
-    if percent >= 70:
-        return "👍 Хороший результат"
-    if percent >= 50:
-        return "⚠ Нужно повторить материал"
-    return "❌ Требуется обучение"
-
-
-async def _send_question(message: Message, state: FSMContext):
-    data = await state.get_data()
-    questions = data["questions"]
-    current = data["current"]
-    question = questions[current]
-    await state.update_data(answered=False, selected=[])
-    text = f"Вопрос {current + 1}/{len(questions)}\n\n<b>{question['text']}</b>"
-    if question["is_multiple"]:
-        text += "\n\nВыберите один или несколько вариантов:"
-    await message.answer(
-        text,
-        reply_markup=answer_keyboard(current, question["answers"], is_multiple=question["is_multiple"]),
-    )
-
-
-@router.message(
-    F.text == "📚 Начать тест"
-)
-async def start_test(
-        message: Message,
-        state: FSMContext
-):
-    user = await get_user(message.from_user.id)
-
-    if not user or user[4] != ROLE_EMPLOYEE:
-        await message.answer("❌ Тестирование доступно только сотрудникам.")
-        return
-
-    await state.clear()
-    await message.answer("Выберите режим тестирования:", reply_markup=test_mode_keyboard())
-
-
-@router.callback_query(F.data == "test:mode:category")
-async def choose_test_category(callback: CallbackQuery):
-    categories = get_bank_categories()
-    if not categories:
-        await callback.message.answer("❌ В базе пока нет вопросов для обучения.")
-        await callback.answer()
-        return
-    await callback.message.edit_text("Выберите категорию:", reply_markup=categories_keyboard())
-    await callback.answer()
-
-
-@router.callback_query(F.data == "test:mode:full")
-async def start_full_test(callback: CallbackQuery, state: FSMContext):
-    await _start_selected_test(callback, state, None)
-
-
-@router.callback_query(F.data.startswith("test:category:"))
-async def start_category_test(callback: CallbackQuery, state: FSMContext):
-    categories = get_bank_categories()
-    index = int(callback.data.split(":")[-1])
-    if index >= len(categories):
-        await callback.answer("Категория не найдена", show_alert=True)
-        return
-    await _start_selected_test(callback, state, categories[index])
-
-
-async def _start_selected_test(callback: CallbackQuery, state: FSMContext, category: str | None):
-    questions = build_test(category)
-    if not questions:
-        await callback.message.answer("❌ Для выбранного режима нет вопросов.")
-        await callback.answer()
-        return
-    await state.set_state(TestState.answering)
-    await state.update_data(
-        category=category or "Полный тест",
-        questions=[_question_payload(question) for question in questions],
-        current=0,
-        correct_count=0,
-        answered=False,
-        selected=[],
-    )
-    await callback.message.edit_text("✅ Тест сформирован. Вопросы и ответы перемешаны.")
-    await _send_question(callback.message, state)
-    await callback.answer()
-
-
-@router.callback_query(TestState.answering, F.data.startswith("test:answer:"))
-async def answer_test_question(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if data.get("answered"):
-        await callback.answer("Нажмите «Следующий вопрос».", show_alert=True)
-        return
-    _, _, question_index, answer_index = callback.data.split(":")
-    question_index = int(question_index)
-    answer_index = int(answer_index)
-    question = data["questions"][question_index]
-    selected = set(data.get("selected", []))
-    if question["is_multiple"]:
-        selected.symmetric_difference_update({answer_index})
-        await state.update_data(selected=list(selected))
-        await callback.message.edit_reply_markup(reply_markup=answer_keyboard(question_index, question["answers"], selected, True))
-        await callback.answer()
-        return
-    await _finish_answer(callback, state, {answer_index})
-
-
-@router.callback_query(TestState.answering, F.data.startswith("test:check:"))
-async def check_multiple_answer(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    selected = set(data.get("selected", []))
-    if not selected:
-        await callback.answer("Сначала выберите ответ.", show_alert=True)
-        return
-    await _finish_answer(callback, state, selected)
-
-
-async def _finish_answer(callback: CallbackQuery, state: FSMContext, selected: set[int]):
-    data = await state.get_data()
-    current = data["current"]
-    question = data["questions"][current]
-    correct = set(question["correct"])
-    is_correct = selected == correct
-    correct_count = data["correct_count"] + (1 if is_correct else 0)
-    await state.update_data(answered=True, correct_count=correct_count)
-    correct_text = ", ".join(f"{chr(65 + index)}) {question['answers'][index]}" for index in sorted(correct))
-    result_title = "✅ Правильно!" if is_correct else "❌ Неправильно!"
-    await callback.message.edit_text(
-        f"{result_title}\n\n"
-        f"Правильный ответ: <b>{correct_text}</b>\n\n"
-        f"Объяснение: {question['explanation']}",
-        reply_markup=next_question_keyboard(),
-    )
-    await callback.answer()
-
-
-@router.callback_query(TestState.answering, F.data == "test:next")
-async def next_test_question(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if not data.get("answered"):
-        await callback.answer("Сначала ответьте на вопрос.", show_alert=True)
-        return
-    next_index = data["current"] + 1
-    if next_index >= len(data["questions"]):
-        await _finish_test(callback, state)
-        return
-    await state.update_data(current=next_index, answered=False, selected=[])
-    await _send_question(callback.message, state)
-    await callback.answer()
-
-
-async def _finish_test(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    user = await get_user(callback.from_user.id)
-    total = len(data["questions"])
-    correct = data["correct_count"]
-    percent = round(correct / total * 100) if total else 0
-    await save_result(user[0], percent, correct, total, data["category"], user[5])
-    await state.clear()
-    await callback.message.answer(
-        "📊 <b>Результат теста</b>\n\n"
-        f"Категория: <b>{data['category']}</b>\n"
-        f"Всего вопросов: {total}\n"
-        f"Правильных: {correct}\n"
-        f"Ошибок: {total - correct}\n"
-        f"Процент: {percent}%\n\n"
-        f"Оценка:\n{_score_text(percent)}",
-        reply_markup=employee_menu(),
-    )
-    await callback.answer()
-
-
-# ============================================================
-# DELETE EMPLOYEE + DELETE PVZ
-# ============================================================
-
-
-@router.message(
-    F.text == "❌ Удалить сотрудника"
-)
-async def delete_employee_start(
-        message: Message,
-        state: FSMContext
-):
-
-
-    user = await get_user(
-        message.from_user.id
-    )
-
-
-    if not user:
-
-
-        await message.answer(
-            "❌ Пользователь не найден."
-        )
-
-        return
-
-
-
-    if user[4] not in [
-        ROLE_ADMIN,
-        ROLE_SUPER_ADMIN
-    ]:
-
-
-        await message.answer(
-            "❌ Нет доступа."
-        )
-
-        return
-
-
-
-
-    await message.answer(
-        "Введите Telegram ID сотрудника, которого нужно удалить:"
-    )
-
-
-    await state.set_state(
-        DeleteState.waiting_employee_id
-    )
-
-
-
-
-
-@router.message(
-    DeleteState.waiting_employee_id
-)
-async def delete_employee_confirm(
-        message: Message,
-        state: FSMContext
-):
-
-
-    try:
-
-        employee_id = int(
-            message.text
-        )
-
-    except:
-
-
-        await message.answer(
-            "❌ ID должен быть числом."
-        )
-
-        return
-
-
-
-
-    employee = await get_user(
-        employee_id
-    )
-
-
-
-    if not employee:
-
-
-        await message.answer(
-            "❌ Пользователь не найден."
-        )
-
-        await state.clear()
-
-        return
-
-
-
-
-    current_user = await get_user(
-        message.from_user.id
-    )
-
-
-
-    # владелец может удалять только своих
-
-    if current_user[4] == ROLE_ADMIN:
-
-
-        if employee[5] != current_user[5]:
-
-
-            await message.answer(
-                "❌ Этот сотрудник не относится к вашему ПВЗ."
-            )
-
-            await state.clear()
-
-            return
-
-
-
-
-    await state.update_data(
-        delete_employee_id=employee_id
-    )
-
-
-
-    username = employee[3]
-
-
-    if username:
-
-        name = "@" + username
-
-    else:
-
-        name = employee[2]
-
-
-
-    await message.answer(
-        "⚠️ Подтвердите удаление:\n\n"
-        f"👤 {name}\n"
-        f"ID: <code>{employee_id}</code>",
-        reply_markup=delete_confirm_menu()
-    )
-
-
-    await state.set_state(
-        DeleteState.confirm_delete
-    )
-
-
-
-
-
-@router.message(
-    DeleteState.confirm_delete,
-    F.text == "✅ Подтвердить"
-)
-async def delete_employee_apply(
-        message: Message,
-        state: FSMContext
-):
-
-
-    data = await state.get_data()
-
-
-    employee_id = data.get(
-        "delete_employee_id"
-    )
-
-
-
-    if employee_id:
-
-
-        await delete_employee(
-            employee_id
-        )
-
-
-
-    await state.clear()
-
-
-
-    await message.answer(
-        "✅ Сотрудник удалён.",
-        reply_markup=admin_menu()
-    )
-
-
-
-
-
-@router.message(
-    DeleteState.confirm_delete,
-    F.text == "❌ Отмена"
-)
-async def delete_cancel(
-        message: Message,
-        state: FSMContext
-):
-
-
-    await state.clear()
-
-
-    await message.answer(
-        "❌ Удаление отменено."
-    )
-
-
-
-
-
-# ============================================================
-# DELETE PVZ (SUPER ADMIN)
-# ============================================================
-
-
-@router.message(
-    F.text == "🗑 Удалить ПВЗ"
-)
-async def delete_pvz_start(
-        message: Message,
-        state: FSMContext
-):
-
-
-    if not is_super_admin(
-        message.from_user.id
-    ):
-
-
-        await message.answer(
-            "❌ Нет доступа."
-        )
-
-        return
-
-
-
-    await message.answer(
-        "Введите ID ПВЗ для удаления:"
-    )
-
-
-    await state.set_state(
-        DeleteState.waiting_pvz_id
-    )
-
-
-
-
-
-@router.message(
-    DeleteState.waiting_pvz_id
-)
-async def delete_pvz_apply(
-        message: Message,
-        state: FSMContext
-):
-
-
-    try:
-
-        pvz_id = int(
-            message.text
-        )
-
-    except:
-
-
-        await message.answer(
-            "❌ ID должен быть числом."
-        )
-
-        return
-
-
-
-
-    pvz = await get_pvz_by_id(
-        pvz_id
-    )
-
-
-    if not pvz:
-
-
-        await message.answer(
-            "❌ ПВЗ не найден."
-        )
-
-        await state.clear()
-
-        return
-
-
-
-
-    await delete_pvz(
-        pvz_id
-    )
-
-
-    await state.clear()
-
-
-    await message.answer(
-        "🗑 ПВЗ удалён.",
-        reply_markup=super_admin_menu()
-        )
-
-
-# ============================================================
-# ASSIGN PVZ OWNER
-# ============================================================
-
-class AssignOwnerState(StatesGroup):
-
-    waiting_user_id = State()
-
-    waiting_pvz_id = State()
-
-
-@router.message(
-    F.text == "👥 Владельцы ПВЗ"
-)
-async def owners_menu(
-        message: Message,
-        state: FSMContext
-):
-
-    if not is_super_admin(
-        message.from_user.id
-    ):
-
-        await message.answer(
-            "❌ Нет доступа."
-        )
-
-        return
-
-    await state.clear()
-
-    admins = await get_all_admins()
-
-    text = "👥 <b>Владельцы ПВЗ</b>\n\n"
-
-    if admins:
-
-        for admin in admins:
-
-            pvz_name = "Не назначен"
-
-            if admin[5]:
-
-                pvz = await get_pvz_by_id(admin[5])
-
-                if pvz:
-                    pvz_name = pvz[1]
-
-            username = (
-                f"@{admin[3]}"
-                if admin[3]
-                else admin[2]
-            )
-
-            text += (
-                f"{username}\n"
-                f"ID: <code>{admin[1]}</code>\n"
-                f"ПВЗ: {pvz_name}\n\n"
-            )
-
-    else:
-
-        text += "Пока владельцев нет.\n\n"
-
-    text += (
-        "Отправьте Telegram ID пользователя, "
-        "которого нужно сделать владельцем ПВЗ."
-    )
-
-    await message.answer(text)
-
-    await state.set_state(
-        AssignOwnerState.waiting_user_id
-    )
-
-
-@router.message(
-    AssignOwnerState.waiting_user_id
-)
-async def assign_owner_user(
-        message: Message,
-        state: FSMContext
-):
-
-    try:
-        telegram_id = int(message.text)
-    except:
-        await message.answer(
-            "❌ ID должен быть числом."
-        )
-        return
-
-    user = await get_user(
-        telegram_id
-    )
-
-    if not user:
-
-        await message.answer(
-            "❌ Пользователь не найден."
-        )
-        return
-
-    await state.update_data(
-        owner_id=telegram_id
-    )
-
-    async with aiosqlite.connect(DATABASE) as db:
-
-        cursor = await db.execute(
-            """
-            SELECT *
-            FROM pvz
-            ORDER BY id
-            """
-        )
-
-        pvzs = await cursor.fetchall()
-
-    if not pvzs:
-
-        await message.answer(
-            "❌ В системе нет ПВЗ."
-        )
-
-        await state.clear()
-
-        return
-
-    text = (
-        "Введите ID ПВЗ.\n\n"
-        "Доступные ПВЗ:\n\n"
-    )
-
-    for pvz in pvzs:
-
-        text += (
-            f"{pvz[0]} — {pvz[1]}\n"
-        )
-
-    await message.answer(text)
-
-    await state.set_state(
-        AssignOwnerState.waiting_pvz_id
-    )
-
-
-@router.message(
-    AssignOwnerState.waiting_pvz_id
-)
-async def assign_owner_finish(
-        message: Message,
-        state: FSMContext
-):
-
-    try:
-        pvz_id = int(message.text)
-    except:
-        await message.answer(
-            "❌ ID ПВЗ должен быть числом."
-        )
-        return
-
-    pvz = await get_pvz_by_id(
-        pvz_id
-    )
-
-    if not pvz:
-
-        await message.answer(
-            "❌ ПВЗ не найден."
-        )
-
-        return
-
-    data = await state.get_data()
-
-    owner_id = data["owner_id"]
-
-    await set_pvz_owner(
-        pvz_id,
-        owner_id
-    )
-
-    await state.clear()
-
-    await message.answer(
-        "✅ Владелец успешно назначен.",
-        reply_markup=super_admin_menu()
-    )
-    
-
-# ============================================================
-# REMOVE PVZ OWNER
-# ============================================================
-
-class RemoveOwnerState(StatesGroup):
-
-    waiting_owner_id = State()
-
-
-@router.message(
-    F.text == "🚫 Снять владельца"
-)
-async def remove_owner_start(
-        message: Message,
-        state: FSMContext
-):
-
-    if not is_super_admin(message.from_user.id):
-
-        await message.answer(
-            "❌ Нет доступа."
-        )
-
-        return
-
-    admins = await get_all_admins()
-
-    if not admins:
-
-        await message.answer(
-            "Владельцев ПВЗ пока нет."
-        )
-
-        return
-
-    text = "👥 <b>Владельцы ПВЗ</b>\n\n"
-
-    for admin in admins:
-
-        username = (
-            f"@{admin[3]}"
-            if admin[3]
-            else admin[2]
-        )
-
-        pvz_name = "Не назначен"
-
-        if admin[5]:
-
-            pvz = await get_pvz_by_id(admin[5])
-
-            if pvz:
-
-                pvz_name = pvz[1]
-
-        text += (
-            f"{username}\n"
-            f"ID: <code>{admin[1]}</code>\n"
-            f"ПВЗ: {pvz_name}\n\n"
-        )
-
-    text += "Введите Telegram ID владельца:"
-
-    await message.answer(text)
-
-    await state.set_state(
-        RemoveOwnerState.waiting_owner_id
-    )
-
-
-@router.message(
-    RemoveOwnerState.waiting_owner_id
-)
-async def remove_owner_finish(
-        message: Message,
-        state: FSMContext
-):
-
-    try:
-
-        owner_id = int(message.text)
-
-    except:
-
-        await message.answer(
-            "❌ ID должен быть числом."
-        )
-
-        return
-
-    user = await get_user(owner_id)
-
-    if not user:
-
-        await message.answer(
-            "❌ Пользователь не найден."
-        )
-
-        await state.clear()
-
-        return
-
-    if user[4] != ROLE_ADMIN:
-
-        await message.answer(
-            "❌ Этот пользователь не является владельцем ПВЗ."
-        )
-
-        await state.clear()
-
-        return
-
-    await remove_pvz_owner(owner_id)
-
-    await state.clear()
-
-    await message.answer(
-        "✅ Владелец снят с ПВЗ.",
-        reply_markup=super_admin_menu()
-    )
-    
-
-# ============================================================
-# ERROR SAFE HANDLER
-# ============================================================
-
+        for p in await get_admin_pvz(message.from_user.id): recipients += await get_pvz_employees_only(p[0])
+    await state.update_data(message_id=message.message_id, recipients=[u[1] for u in recipients], content_type=message.content_type, text=message.text or message.caption)
+    await state.set_state(BroadcastState.confirming); await message.answer(f"📢 <b>Рассылка</b>\n\nПолучателей:\n{len(recipients)}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отправить", callback_data="bc:send")],[InlineKeyboardButton(text="Отмена", callback_data="bc:cancel")]]))
+@router.callback_query(BroadcastState.confirming, F.data.startswith("bc:"))
+async def broadcast_send(cb:CallbackQuery,state:FSMContext,bot:Bot):
+    if cb.data.endswith("cancel"): await state.clear(); await cb.message.edit_text("❌ Рассылка отменена"); return
+    d=await state.get_data(); ok=fail=0
+    for tg in d['recipients']:
+        try: await bot.copy_message(tg, cb.from_user.id, d['message_id']); ok+=1
+        except Exception: fail+=1; log.exception("broadcast failed")
+    user=await get_user(cb.from_user.id); await save_broadcast(user[0], d['content_type'], d.get('text'), len(d['recipients']), ok, fail); await state.clear(); await cb.message.edit_text(f"📢 <b>Готово</b>\n\nОтправлено:\n{ok}\n\nОшибки:\n{fail}")
+
+@router.message(F.text == "🔑 Код приглашения")
+async def invite(message:Message):
+    pvzs=await get_admin_pvz(message.from_user.id); await message.answer("\n".join(f"📍 {escape(p[1])}: <code>{p[2]}</code>" for p in pvzs) or "ПВЗ нет", reply_markup=admin_menu())
+@router.message(F.text == "📝 Управление тестами")
+async def manage_tests(message:Message): await message.answer(f"📝 Вопросов в TXT: <b>{len(load_questions())}</b>\nКатегории: {', '.join(get_categories())}")
+@router.message(F.text.in_({"🏆 Лучшие сотрудники","🏆 Рейтинг"}))
+async def rating(message:Message): await message.answer("🏆 <b>Лучшие сотрудники</b>\n\nРейтинг будет строиться по проценту, количеству тестов и скорости после накопления результатов.")
+@router.message(F.text == "⚙️ Настройки")
+async def settings(message:Message): await message.answer("⚙️ Настройки будут расширены в следующих версиях.")
+
+@router.message(F.text == "❌ Удалить сотрудника")
+async def delete_employee_start(message: Message, state: FSMContext):
+    user=await get_user(message.from_user.id)
+    if not user or user[4] not in {ROLE_ADMIN,ROLE_SUPER_ADMIN}: await message.answer("❌ Нет доступа."); return
+    await state.set_state(DeleteState.waiting_employee_id); await message.answer("Введите Telegram ID сотрудника:")
+@router.message(DeleteState.waiting_employee_id)
+async def delete_employee_finish(message: Message, state: FSMContext):
+    try: tg=int(message.text)
+    except Exception: await message.answer("❌ ID должен быть числом."); return
+    current=await get_user(message.from_user.id); employee=await get_user(tg)
+    if not employee or employee[4]!=ROLE_EMPLOYEE: await message.answer("❌ Сотрудник не найден."); await state.clear(); return
+    if current[4]==ROLE_ADMIN and employee[5]!=current[5]: await message.answer("❌ Это не ваш сотрудник."); await state.clear(); return
+    await delete_employee(tg); await state.clear(); await message.answer("✅ Сотрудник удалён.", reply_markup=menu(current[4]))
+@router.message(F.text == "🗑 Удалить ПВЗ")
+async def delete_pvz_start(message: Message, state: FSMContext):
+    if not is_super_admin(message.from_user.id): await message.answer("❌ Нет доступа."); return
+    await state.set_state(DeleteState.waiting_pvz_id); await message.answer("Введите ID ПВЗ для удаления:")
+@router.message(DeleteState.waiting_pvz_id)
+async def delete_pvz_finish(message: Message, state: FSMContext):
+    try: pid=int(message.text)
+    except Exception: await message.answer("❌ ID должен быть числом."); return
+    if not await get_pvz_by_id(pid): await message.answer("❌ ПВЗ не найден."); await state.clear(); return
+    await delete_pvz(pid); await state.clear(); await message.answer("🗑 ПВЗ удалён.", reply_markup=super_admin_menu())
+@router.message(F.text == "👥 Владельцы ПВЗ")
+async def owners_start(message: Message, state: FSMContext):
+    if not is_super_admin(message.from_user.id): await message.answer("❌ Нет доступа."); return
+    admins=await get_all_admins(); text="👥 <b>Владельцы ПВЗ</b>\n\n"+"".join(f"{display_user(a)} — <code>{a[1]}</code>\n" for a in admins)+"\nОтправьте Telegram ID будущего владельца:"
+    await state.set_state(AssignOwnerState.waiting_user_id); await message.answer(text)
+@router.message(AssignOwnerState.waiting_user_id)
+async def owner_user(message: Message, state: FSMContext):
+    try: tg=int(message.text)
+    except Exception: await message.answer("❌ ID должен быть числом."); return
+    if not await get_user(tg): await message.answer("❌ Пользователь не найден."); return
+    pvzs=await get_all_pvz(); await state.update_data(owner_id=tg); await state.set_state(AssignOwnerState.waiting_pvz_id); await message.answer("Введите ID ПВЗ:\n"+"\n".join(f"{p[0]} — {escape(p[1])}" for p in pvzs))
+@router.message(AssignOwnerState.waiting_pvz_id)
+async def owner_finish(message: Message, state: FSMContext):
+    try: pid=int(message.text)
+    except Exception: await message.answer("❌ ID должен быть числом."); return
+    d=await state.get_data(); await set_pvz_owner(pid,d['owner_id']); await state.clear(); await message.answer("✅ Владелец назначен.", reply_markup=super_admin_menu())
+@router.message(F.text == "🚫 Снять владельца")
+async def remove_owner_start(message: Message, state: FSMContext):
+    if not is_super_admin(message.from_user.id): await message.answer("❌ Нет доступа."); return
+    await state.set_state(RemoveOwnerState.waiting_owner_id); await message.answer("Введите Telegram ID владельца:")
+@router.message(RemoveOwnerState.waiting_owner_id)
+async def remove_owner_finish(message: Message, state: FSMContext):
+    try: tg=int(message.text)
+    except Exception: await message.answer("❌ ID должен быть числом."); return
+    await remove_pvz_owner(tg); await state.clear(); await message.answer("✅ Владелец снят.", reply_markup=super_admin_menu())
 
 @router.message()
-async def unknown_message(
-        message: Message
-):
-
-
-    await message.answer(
-        "Я не понял команду.\n"
-        "Используйте кнопки меню."
-    )
-
-
-# ============================================================
+async def unknown(message: Message):
+    await message.answer("Используйте кнопки главного меню.")
