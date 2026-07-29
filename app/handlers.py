@@ -102,18 +102,16 @@ async def test_menu(message: Message, state: FSMContext):
     await state.clear(); await message.answer("📝 <b>Тест WB TRAINER</b>\n\nОдин тест содержит до 30 вопросов.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎯 Полный тест", callback_data="test:full")]]+[[InlineKeyboardButton(text=c, callback_data=f"test:cat:{i}")] for i,c in enumerate(get_categories())]))
 
 def answer_k(qi, q, selected=None):
-    if not q["answers"]: return None
     rows=[[InlineKeyboardButton(text=("☑ " if selected and i in selected else "")+f"{chr(65+i)}) {a[:45]}", callback_data=f"test:ans:{qi}:{i}")] for i,a in enumerate(q["answers"])]
     if q["multiple"]: rows.append([InlineKeyboardButton(text="✅ Проверить ответ", callback_data="test:check")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 async def show_question(msg, state):
     d=await state.get_data(); q=d["questions"][d["current"]]; await state.update_data(answered=False, selected=[])
     text=f"📝 <b>Тест WB TRAINER</b>\n\nВопрос {d['current']+1}/{len(d['questions'])}\n\n{escape(q['text'])}"
-    if not q["answers"]: text+="\n\nВведите ответ:"
     sent=await msg.answer(text, reply_markup=answer_k(d['current'], q)); await state.update_data(message_id=sent.message_id)
 def payload(q:Question):
     order=list(range(len(q.answers))); random.shuffle(order); answers=[q.answers[i] for i in order]
-    correct=[order.index(i) for i in q.correct_indexes if i in order] if q.answers else q.correct_answers
+    correct=[order.index(i) for i in q.correct_indexes]
     return {"text":q.text,"answers":answers,"correct":correct,"explanation":q.explanation,"multiple":q.is_multiple}
 @router.callback_query(F.data.startswith("test:"))
 async def test_callbacks(cb: CallbackQuery, state: FSMContext):
@@ -139,16 +137,8 @@ async def finish_answer(cb,state,selected):
     d=await state.get_data(); q=d["questions"][d["current"]]; ok=selected==set(q["correct"]); cc=d["correct_count"]+(1 if ok else 0); mistakes=d.get("mistakes",[])
     if not ok: mistakes.append({"question":q["text"],"correct":q["correct"]})
     await state.update_data(answered=True, correct_count=cc, mistakes=mistakes)
-    correct=", ".join(f"{chr(65+i)}) {q['answers'][i]}" for i in q["correct"]) if q["answers"] else ", ".join(q["correct"])
+    correct=", ".join(f"{chr(65+i)}) {q['answers'][i]}" for i in q["correct"])
     await cb.message.edit_text(("✅ Правильно" if ok else "❌ Ошибка")+f"\n\nПравильный ответ: <b>{escape(correct)}</b>\n\nОбъяснение:\n{escape(q['explanation'])}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➡️ Далее", callback_data="test:next")]])); await cb.answer()
-@router.message(TestState.answering)
-async def text_answer(message:Message,state:FSMContext):
-    d=await state.get_data(); q=d["questions"][d["current"]]
-    if q["answers"]: return
-    ok=(message.text or '').strip().casefold() in [a.casefold() for a in q['correct']]; await finish_text(message,state,ok)
-async def finish_text(message,state,ok):
-    d=await state.get_data(); q=d['questions'][d['current']]; await state.update_data(answered=True, correct_count=d['correct_count']+(1 if ok else 0))
-    await message.answer(("✅ Правильно" if ok else "❌ Ошибка")+f"\n\nПравильный ответ: <b>{escape(', '.join(q['correct']))}</b>\n\nОбъяснение:\n{escape(q['explanation'])}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➡️ Далее", callback_data="test:next")]]))
 async def finish_test(cb,state):
     d=await state.get_data(); user=await get_user(cb.from_user.id); total=len(d['questions']); correct=d['correct_count']; pct=round(correct/total*100) if total else 0
     await save_result(user[0],pct,correct,total,d['category'],user[5],int(time.time()-d.get('started_at',time.time())),d.get('mistakes',[])); await state.clear()

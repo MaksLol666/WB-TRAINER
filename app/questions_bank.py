@@ -84,15 +84,20 @@ def _parse(block: str, fallback_category: str) -> Question | None:
     category = _inline(block, "Категория") or fallback_category or DEFAULT_CATEGORY
     difficulty = DIFFICULTY_MAP.get((_inline(block, "Сложность") or "").lower(), DEFAULT_DIFFICULTY)
     qtype = _inline(block, "Тип") or DEFAULT_TYPE
+    # Tests are intentionally limited to questions answered with buttons.  A
+    # sequence requires a separate ordering UI and must not silently degrade to
+    # a text answer.
+    if "последователь" in qtype.lower():
+        return None
     text = _section(block, ("Вопрос",), ("Варианты", "Правильный ответ", "Правильные ответы", "Ответ", "Объяснение"))
     # If no explicit Варианты marker, remove option/correct sections from question text.
     text = re.sub(r"\n\s*[A-H]\.\s.*", "", text, flags=re.S).strip()
     answers = _answers(block)
     correct = _correct(block, answers)
     explanation = _section(block, ("Объяснение",), tuple()) or "Объяснение не указано."
-    if not text or not correct:
+    if not text or len(answers) < 2 or not correct:
         return None
-    if answers and not Question("", category, difficulty, qtype, text, answers, correct, explanation).correct_indexes:
+    if not Question("", category, difficulty, qtype, text, answers, correct, explanation).correct_indexes:
         return None
     return Question(mid.group(0), category, difficulty, qtype, re.sub(r"\s+", " ", text).strip(), answers, correct, re.sub(r"\s+", " ", explanation).strip())
 
