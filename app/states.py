@@ -6,4 +6,4 @@ class DeleteState(StatesGroup): waiting_employee_id = State(); waiting_pvz_id = 
 class AssignOwnerState(StatesGroup): waiting_user_id = State(); waiting_pvz_id = State()
 class RemoveOwnerState(StatesGroup): waiting_owner_id = State()
 class BroadcastState(StatesGroup): waiting_scope = State(); waiting_content = State(); confirming = State()
-class TestState(StatesGroup): answering = State(); text_answer = State()
+class TestState(StatesGroup): answering = State()
